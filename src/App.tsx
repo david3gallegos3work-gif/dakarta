@@ -29,7 +29,7 @@ type Info = {
 }
 type Doc = { info: Info; id: number }
 type Coincidencia = { pagina: number; x: number; y: number; w: number; h: number }
-type Busqueda = { texto: string; resultados: Coincidencia[]; escaneado: boolean }
+type Busqueda = { texto: string; resultados: Coincidencia[]; escaneado: boolean; truncada: boolean }
 /** Punto de una página que debe quedar en el mismo lugar de la pantalla tras un zoom o un giro. */
 type Ancla = { i: number; fx: number; fy: number; vx: number; vy: number }
 type Rango = [number, number]
@@ -530,6 +530,7 @@ export default function App() {
               ×
             </button>
           </div>
+          {busqueda?.truncada && <p className="buscar-nota">Hay más resultados. Escribe una palabra más específica.</p>}
           {busqueda && !busqueda.resultados.length && (
             <p className="buscar-aviso">
               {busqueda.escaneado
@@ -695,7 +696,8 @@ const Paginas = memo(function Paginas({
     return m
   }, [busqueda])
   return Array.from({ length: doc.info.paginas }, (_, n) => {
-    const resaltados = porPagina.get(n)
+    // Solo se pintan los resaltados de lo que se está viendo: una palabra común no llena la pantalla de capas.
+    const resaltados = dentro(visibles, n) || dentro(cercanas, n) ? porPagina.get(n) : undefined
     return (
       <Pagina
         key={n}
