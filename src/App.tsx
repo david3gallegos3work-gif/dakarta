@@ -521,7 +521,12 @@ export default function App() {
               aria-label="Compartir"
               title="Compartir"
             >
-              ⤴
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8.8 10.6 15.2 6.4M8.8 13.4l6.4 4.2" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
+                <circle cx="18" cy="5" r="3.2" fill="currentColor" />
+                <circle cx="6" cy="12" r="3.2" fill="currentColor" />
+                <circle cx="18" cy="19" r="3.2" fill="currentColor" />
+              </svg>
             </button>
             <button
               onClick={() => (verBuscar ? cerrarBuscar() : setVerBuscar(true))}
@@ -670,6 +675,9 @@ export default function App() {
         <div
           className="visor"
           ref={visor}
+          onClick={() => {
+            if (verIndice) setVerIndice(false)
+          }}
           onScroll={() => {
             medir()
             clearTimeout(relojVecinas.current)
