@@ -9,7 +9,8 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .app { height: 100dvh; display: flex; flex-direction: column; }
 
 /* En el celular la app se dibuja bajo la barra de estado: se deja su espacio (en la PC vale 0). */
-.barra { display: flex; align-items: center; gap: 2px; padding: calc(6px + env(safe-area-inset-top)) 6px 6px; background: #1565c0; color: #fff; white-space: nowrap; }
+.barra { display: flex; align-items: center; gap: 2px; padding: calc(6px + env(safe-area-inset-top)) 6px 6px; background: #1565c0; color: #fff; white-space: nowrap; overflow-x: auto; scrollbar-width: none; }
+.barra::-webkit-scrollbar { display: none; }
 .barra button { min-width: 36px; height: 36px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 17px; cursor: pointer; }
 .barra button:hover, .barra button[aria-pressed='true'] { background: rgba(255, 255, 255, 0.2); }
 .barra button:disabled { opacity: 0.6; }
@@ -17,6 +18,15 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .barra .derecha { margin-left: auto; }
 .pag { display: flex; align-items: center; gap: 4px; margin: 0 4px 0 auto; font-size: 14px; }
 .pag input { width: 54px; height: 30px; border: 0; border-radius: 4px; text-align: center; font: inherit; }
+
+.buscar { flex: none; background: #e8eef5; border-bottom: 1px solid #cfd8e3; color: #1a1a1a; }
+.buscar .fila { display: flex; align-items: center; gap: 4px; padding: 6px; }
+.buscar input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid #9fb3c8; border-radius: 6px; background: #fff; color: inherit; font: inherit; }
+.buscar .cuenta { min-width: 84px; font-size: 13px; text-align: center; color: #455a64; }
+.buscar button { min-width: 36px; height: 34px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 17px; cursor: pointer; }
+.buscar button:hover { background: rgba(0, 0, 0, 0.08); }
+.buscar button:disabled { opacity: 0.4; cursor: default; }
+.buscar-aviso { margin: 0; padding: 0 10px 8px; color: #b71c1c; font-size: 14px; }
 
 .cuerpo { position: relative; flex: 1; min-height: 0; display: flex; }
 .visor { flex: 1; overflow: auto; background: #525659; touch-action: pan-x pan-y; overscroll-behavior: contain; }
@@ -26,6 +36,8 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .pagina img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none; }
 .numero { color: #888; font-size: 14px; }
 .fallo { position: absolute; z-index: 1; padding: 4px 8px; border-radius: 4px; background: #ffebee; color: #b71c1c; font-size: 14px; }
+.resaltado { position: absolute; z-index: 1; border-radius: 1px; background: rgba(255, 213, 0, 0.35); pointer-events: none; }
+.resaltado.actual { background: rgba(255, 145, 0, 0.5); box-shadow: 0 0 0 1px rgba(230, 80, 0, 0.8); }
 
 .indice { flex: none; width: min(320px, 85vw); overflow: auto; padding: 8px 0; background: #fff; border-right: 1px solid #ddd; }
 .indice ul { list-style: none; margin: 0; padding-left: 12px; }
@@ -42,6 +54,11 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .bienvenida { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; overflow: auto; background: #fff; text-align: center; }
 .bienvenida img { width: min(360px, 80vw); height: auto; }
 .grande { padding: 14px 28px; border: 0; border-radius: 8px; background: #1565c0; color: #fff; font: inherit; font-size: 18px; cursor: pointer; }
+.recientes { width: min(420px, 100%); text-align: left; }
+.recientes h2 { margin: 0 0 6px; font-size: 16px; }
+.recientes ul { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.recientes button { width: 100%; padding: 9px 12px; overflow: hidden; border: 1px solid #cfd8e3; border-radius: 6px; background: #f5f8fc; color: inherit; font: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.recientes button:hover { background: #e3f2fd; }
 .creditos { max-width: 420px; color: #666; font-size: 13px; }
 .error { color: #b71c1c; }
 .aviso-error { position: absolute; z-index: 3; top: 8px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px); padding: 8px 12px; border: 0; border-radius: 8px; background: #ffebee; color: #b71c1c; font: inherit; }
@@ -58,3 +75,9 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .noche .pagina img { filter: invert(1) hue-rotate(180deg); }
 .noche .bienvenida, .noche .indice { background: #1a1a1a; color: #eee; border-color: #333; }
 .noche .indice button:hover { background: rgba(255, 255, 255, 0.08); }
+.noche .buscar { background: #222; border-color: #333; color: #eee; }
+.noche .buscar input { background: #333; border-color: #555; color: #eee; }
+.noche .buscar .cuenta { color: #bbb; }
+.noche .buscar-aviso { color: #ff8a80; }
+.noche .recientes button { background: #242424; border-color: #3a3a3a; }
+.noche .recientes button:hover { background: #2f2f2f; }

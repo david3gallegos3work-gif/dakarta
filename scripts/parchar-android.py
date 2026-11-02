@@ -10,7 +10,7 @@ if LLAMADA not in s:
     sys.exit('MainActivity: no se encontró onCreate')
 s = s.replace(LLAMADA, LLAMADA + '    recibir(intent)\n', 1)
 METODOS = r'''
-  private val puente = PuenteDakarta()
+  private val puente = PuenteDakarta(this)
 
   override fun onNewIntent(intent: android.content.Intent) {
     super.onNewIntent(intent)
@@ -22,6 +22,13 @@ METODOS = r'''
     // Desde "Recientes" Android repite el pedido viejo, cuyo permiso sobre el archivo pudo vencer.
     if ((i.flags and android.content.Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return
     puente.uri = i.dataString
+    // Que el archivo siga abriéndose desde "Últimos archivos" al volver a la app (si el proveedor lo permite).
+    val uri = i.data
+    if (uri != null && (i.flags and android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) != 0) {
+      try {
+        contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      } catch (_: Exception) { }
+    }
   }
 
   override fun onWebViewCreate(webView: android.webkit.WebView) {
@@ -30,7 +37,7 @@ METODOS = r'''
   }
 }
 
-class PuenteDakarta {
+class PuenteDakarta(private val actividad: android.app.Activity) {
   @Volatile var uri: String? = null
 
   @android.webkit.JavascriptInterface
@@ -38,6 +45,25 @@ class PuenteDakarta {
     val u = uri
     uri = null
     return u
+  }
+
+  /** Nombre que muestra el proveedor para el archivo (WhatsApp, Gmail, Descargas…). */
+  @android.webkit.JavascriptInterface
+  fun nombre(uri: String): String? = try {
+    actividad.contentResolver.query(
+      android.net.Uri.parse(uri),
+      arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null
+    )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+  } catch (_: Exception) { null }
+
+  /** El permiso del selector de archivos se guarda para poder reabrir el archivo otro día. */
+  @android.webkit.JavascriptInterface
+  fun persistir(uri: String) {
+    try {
+      actividad.contentResolver.takePersistableUriPermission(
+        android.net.Uri.parse(uri), android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+      )
+    } catch (_: Exception) { }
   }
 }
 '''

@@ -1,19 +1,35 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import logo from '../assets/logo.jpg'
+import { guardarReciente, leerRecientes, type Reciente } from './recientes.ts'
 import { buscarActualizacion, type Actualizacion } from './version.ts'
 import { ANCHO_ENTERA_MAX, anchoEntera, imanZoom, limitarZoom, MINIATURA, recorte, type Recorte } from './zoom.ts'
 
 declare global {
   interface Window {
-    /** Solo en Android (scripts/parchar-android.py): el PDF que llegó por "Abrir con". */
-    DakartaAndroid?: { pendiente(): string | null }
+    /** Solo en Android (scripts/parchar-android.py): el PDF que llegó por "Abrir con" y su nombre. */
+    DakartaAndroid?: {
+      pendiente(): string | null
+      nombre(uri: string): string | null
+      persistir(uri: string): void
+    }
   }
 }
 
 type Entrada = { titulo: string; pagina: number | null; hijos: Entrada[] }
-type Info = { paginas: number; ancho: number; alto: number; indice: Entrada[]; ms: number }
+type Info = {
+  paginas: number
+  ancho: number
+  alto: number
+  indice: Entrada[]
+  ms: number
+  /** Para volver a abrirlo después: una ruta en Windows, un content:// en Android. */
+  ruta: string
+  nombre: string
+}
 type Doc = { info: Info; id: number }
+type Coincidencia = { pagina: number; x: number; y: number; w: number; h: number }
+type Busqueda = { texto: string; resultados: Coincidencia[]; escaneado: boolean }
 /** Punto de una página que debe quedar en el mismo lugar de la pantalla tras un zoom o un giro. */
 type Ancla = { i: number; fx: number; fy: number; vx: number; vy: number }
 type Rango = [number, number]
@@ -60,6 +76,12 @@ export default function App() {
   const [anchoVisor, setAnchoVisor] = useState(0)
   const [msPagina, setMsPagina] = useState<number | null>(null)
   const [nueva, setNueva] = useState<Actualizacion | null>(null)
+  const [recientes, setRecientes] = useState<Reciente[]>(leerRecientes)
+  const [verBuscar, setVerBuscar] = useState(false)
+  const [textoBuscar, setTextoBuscar] = useState('')
+  const [busqueda, setBusqueda] = useState<Busqueda | null>(null)
+  const [buscando, setBuscando] = useState(false)
+  const [coincidencia, setCoincidencia] = useState(-1)
   const visor = useRef<HTMLDivElement>(null)
   const contenido = useRef<HTMLDivElement>(null)
   const zoomRef = useRef(zoom)
@@ -67,6 +89,7 @@ export default function App() {
   const reloj = useRef(0)
   const relojVecinas = useRef(0)
   const ultimoY = useRef(0)
+  const pedidoBusqueda = useRef(0)
   zoomRef.current = zoom
 
   const hijos = () => contenido.current!.children as HTMLCollectionOf<HTMLElement>
@@ -279,6 +302,60 @@ export default function App() {
     [aterrizar],
   )
 
+  /** Lleva la coincidencia a la vista: la página arriba y el texto a un tercio de la pantalla. */
+  const irA = useCallback(
+    (c: Coincidencia) => {
+      const el = hijos()[c.pagina]
+      if (!el) return
+      const v = visor.current!
+      const y = el.offsetTop + (c.y + c.h / 2) * el.offsetHeight
+      v.scrollTop = Math.max(0, y - v.clientHeight / 3)
+      const x = el.offsetLeft + (c.x + c.w / 2) * el.offsetWidth
+      if (x < v.scrollLeft || x > v.scrollLeft + v.clientWidth) v.scrollLeft = Math.max(0, x - v.clientWidth / 2)
+      ultimoY.current = v.scrollTop
+      aterrizar()
+    },
+    [aterrizar],
+  )
+
+  const cerrarBuscar = useCallback(() => {
+    pedidoBusqueda.current++
+    setVerBuscar(false)
+    setBusqueda(null)
+    setBuscando(false)
+    setCoincidencia(-1)
+  }, [])
+
+  const buscar = useCallback(async () => {
+    const texto = textoBuscar.trim()
+    if (!texto) return
+    const id = ++pedidoBusqueda.current
+    setBuscando(true)
+    setError('')
+    try {
+      const r = await invoke<Omit<Busqueda, 'texto'>>('buscar', { texto })
+      if (id !== pedidoBusqueda.current) return
+      setBusqueda({ ...r, texto })
+      setCoincidencia(r.resultados.length ? 0 : -1)
+      if (r.resultados.length) irA(r.resultados[0])
+    } catch (e) {
+      if (id === pedidoBusqueda.current) setError(String(e))
+    } finally {
+      if (id === pedidoBusqueda.current) setBuscando(false)
+    }
+  }, [textoBuscar, irA])
+
+  const mover = useCallback(
+    (paso: number) => {
+      if (!busqueda?.resultados.length) return
+      const total = busqueda.resultados.length
+      const i = (coincidencia + paso + total) % total
+      setCoincidencia(i)
+      irA(busqueda.resultados[i])
+    },
+    [busqueda, coincidencia, irA],
+  )
+
   const alCargar = useCallback((ms: number) => setMsPagina(Math.round(ms)), [])
 
   async function cargar(pedido: Promise<Info | null>) {
@@ -297,6 +374,22 @@ export default function App() {
         setRecortes([])
         ajuste.current = null
         visor.current!.scrollTo(0, 0)
+        setVerBuscar(false)
+        setBusqueda(null)
+        setCoincidencia(-1)
+        pedidoBusqueda.current++
+
+        const puente = window.DakartaAndroid
+        let nombre = info.nombre
+        if (puente) {
+          try {
+            puente.persistir(info.ruta)
+            nombre = puente.nombre(info.ruta) || nombre
+          } catch {
+            // el aviso nativo no está disponible: se usa el nombre que dio el sistema
+          }
+        }
+        setRecientes((lista) => guardarReciente(lista, { ruta: info.ruta, nombre }))
       }
     } catch (e) {
       setError(String(e))
@@ -308,16 +401,25 @@ export default function App() {
   const abrir = () => cargar(invoke<Info | null>('elegir_pdf'))
 
   // "Abrir con Dakarta": Windows lo entrega al arrancar; Android también con la app ya abierta, al volver a ella.
+  // Si nadie mandó un archivo, se reabre el último que se usó.
   useEffect(() => {
-    const abrirRuta = (ruta: string) => cargar(invoke<Info>('abrir_ruta', { ruta }))
+    let llegoArchivo = false
+    const abrirRuta = (ruta: string) => {
+      llegoArchivo = true
+      cargar(invoke<Info>('abrir_ruta', { ruta }))
+    }
     const pendiente = () => {
       const ruta = window.DakartaAndroid?.pendiente()
       if (ruta) abrirRuta(ruta)
     }
+    pendiente()
     invoke<string | null>('archivo_inicial').then((ruta) => {
       if (ruta) abrirRuta(ruta)
+      else if (!llegoArchivo) {
+        const [ultimo] = leerRecientes()
+        if (ultimo) abrirRuta(ultimo.ruta)
+      }
     })
-    pendiente()
     document.addEventListener('visibilitychange', pendiente)
     window.addEventListener('focus', pendiente)
     buscarActualizacion().then(setNueva)
@@ -345,6 +447,14 @@ export default function App() {
           <>
             <button onClick={() => setVerIndice((x) => !x)} aria-pressed={verIndice} aria-label="Índice" title="Índice">
               ☰
+            </button>
+            <button
+              onClick={() => (verBuscar ? cerrarBuscar() : setVerBuscar(true))}
+              aria-pressed={verBuscar}
+              aria-label="Buscar en el documento"
+              title="Buscar en el documento"
+            >
+              🔍
             </button>
             <span className="pag">
               <input
@@ -385,6 +495,51 @@ export default function App() {
         </button>
       </header>
 
+      {verBuscar && doc && (
+        <div className="buscar">
+          <div className="fila">
+            <input
+              autoFocus
+              type="search"
+              value={textoBuscar}
+              onChange={(e) => setTextoBuscar(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  buscar()
+                } else if (e.key === 'Escape') {
+                  cerrarBuscar()
+                }
+              }}
+              placeholder="Buscar en el documento"
+              enterKeyHint="search"
+              aria-label="Buscar en el documento"
+            />
+            <span className="cuenta" aria-live="polite">
+              {buscando
+                ? 'Buscando…'
+                : busqueda && (busqueda.resultados.length ? `${coincidencia + 1} de ${busqueda.resultados.length}` : 'Sin resultados')}
+            </span>
+            <button onClick={() => mover(-1)} disabled={!busqueda?.resultados.length} aria-label="Resultado anterior" title="Resultado anterior">
+              ↑
+            </button>
+            <button onClick={() => mover(1)} disabled={!busqueda?.resultados.length} aria-label="Resultado siguiente" title="Resultado siguiente">
+              ↓
+            </button>
+            <button onClick={cerrarBuscar} aria-label="Cerrar búsqueda" title="Cerrar búsqueda">
+              ×
+            </button>
+          </div>
+          {busqueda && !busqueda.resultados.length && (
+            <p className="buscar-aviso">
+              {busqueda.escaneado
+                ? 'Este PDF parece escaneado: no tiene texto para buscar.'
+                : `No se encontró «${busqueda.texto}».`}
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="cuerpo">
         {doc && verIndice && (
           <nav className="indice" aria-label="Índice">
@@ -421,6 +576,8 @@ export default function App() {
                 visibles={visibles}
                 cercanas={cercanas}
                 recortes={recortes}
+                busqueda={busqueda}
+                coincidencia={coincidencia}
                 alCargar={alCargar}
               />
             )}
@@ -433,6 +590,24 @@ export default function App() {
               {abriendo ? 'Abriendo…' : 'Abrir un PDF'}
             </button>
             {error && <p className="error">{error}</p>}
+            {recientes.length > 0 && (
+              <div className="recientes">
+                <h2>Últimos archivos</h2>
+                <ul>
+                  {recientes.map((r) => (
+                    <li key={r.ruta}>
+                      <button
+                        onClick={() => cargar(invoke<Info>('abrir_ruta', { ruta: r.ruta }))}
+                        disabled={abriendo}
+                        title={r.nombre}
+                      >
+                        {r.nombre}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <p className="creditos">
               Gratis, sin anuncios y sin rastreo. Motor PDF: MuPDF © Artifex Software, Inc. Licencia AGPL-3.0.
             </p>
@@ -481,6 +656,8 @@ const Paginas = memo(function Paginas({
   visibles,
   cercanas,
   recortes,
+  busqueda,
+  coincidencia,
   alCargar,
 }: {
   doc: Doc
@@ -490,6 +667,8 @@ const Paginas = memo(function Paginas({
   visibles: Rango
   cercanas: Rango
   recortes: Recorte[]
+  busqueda: Busqueda | null
+  coincidencia: number
   alCargar: (ms: number) => void
 }) {
   // Alto/ancho real de las páginas ya pintadas que no miden como la primera.
@@ -506,20 +685,34 @@ const Paginas = memo(function Paginas({
   }
   const w = anchoEntera(anchoPedido * devicePixelRatio)
   const dentro = (r: Rango, n: number) => n >= r[0] && n <= r[1]
-  return Array.from({ length: doc.info.paginas }, (_, n) => (
-    <Pagina
-      key={n}
-      n={n}
-      id={doc.id}
-      ancho={ancho}
-      alto={ancho * (prop[n] ?? base)}
-      mini={vistas.current.has(n)}
-      nitida={dentro(visibles, n) || dentro(cercanas, n) ? w : 0}
-      recorte={recortes.find((r) => r.n === n)}
-      medida={medida}
-      alCargar={alCargar}
-    />
-  ))
+  const porPagina = useMemo(() => {
+    const m = new Map<number, { c: Coincidencia; i: number }[]>()
+    busqueda?.resultados.forEach((c, i) => {
+      const lista = m.get(c.pagina)
+      if (lista) lista.push({ c, i })
+      else m.set(c.pagina, [{ c, i }])
+    })
+    return m
+  }, [busqueda])
+  return Array.from({ length: doc.info.paginas }, (_, n) => {
+    const resaltados = porPagina.get(n)
+    return (
+      <Pagina
+        key={n}
+        n={n}
+        id={doc.id}
+        ancho={ancho}
+        alto={ancho * (prop[n] ?? base)}
+        mini={vistas.current.has(n)}
+        nitida={dentro(visibles, n) || dentro(cercanas, n) ? w : 0}
+        recorte={recortes.find((r) => r.n === n)}
+        resaltados={resaltados}
+        actual={resaltados?.some((x) => x.i === coincidencia) ? coincidencia : -1}
+        medida={medida}
+        alCargar={alCargar}
+      />
+    )
+  })
 })
 
 const Pagina = memo(function Pagina({
@@ -530,6 +723,8 @@ const Pagina = memo(function Pagina({
   mini,
   nitida,
   recorte,
+  resaltados,
+  actual,
   medida,
   alCargar,
 }: {
@@ -540,6 +735,8 @@ const Pagina = memo(function Pagina({
   mini: boolean
   nitida: number
   recorte?: Recorte
+  resaltados?: { c: Coincidencia; i: number }[]
+  actual: number
   medida: (n: number, real: number) => void
   alCargar: (ms: number) => void
 }) {
@@ -566,6 +763,18 @@ const Pagina = memo(function Pagina({
         />
       )}
       {recorte && <Detalle r={recorte} id={id} alCargar={alCargar} />}
+      {resaltados?.map(({ c, i }) => (
+        <span
+          key={i}
+          className={i === actual ? 'resaltado actual' : 'resaltado'}
+          style={{
+            left: `${c.x * 100}%`,
+            top: `${c.y * 100}%`,
+            width: `${c.w * 100}%`,
+            height: `${c.h * 100}%`,
+          }}
+        />
+      ))}
     </div>
   )
 })
