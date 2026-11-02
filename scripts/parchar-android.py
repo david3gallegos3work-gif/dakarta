@@ -103,6 +103,23 @@ class PuenteDakarta(private val actividad: android.app.Activity) {
     } catch (_: Exception) { }
   }
 
+  /** Menú de compartir de Android con el PDF que está abierto. */
+  @android.webkit.JavascriptInterface
+  fun compartir(uri: String, nombre: String) {
+    actividad.runOnUiThread {
+      try {
+        val u = android.net.Uri.parse(uri)
+        val i = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+          type = "application/pdf"
+          putExtra(android.content.Intent.EXTRA_STREAM, u)
+          clipData = android.content.ClipData.newRawUri(nombre, u)
+          addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        actividad.startActivity(android.content.Intent.createChooser(i, "Compartir PDF"))
+      } catch (_: Exception) { }
+    }
+  }
+
   /** Selector del sistema con permiso guardable; el archivo vuelve por onActivityResult. */
   @android.webkit.JavascriptInterface
   fun elegir() {

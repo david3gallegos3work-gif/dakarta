@@ -74,8 +74,7 @@ Un lector de PDF **gratis, sin anuncios, sin rastreo y sin cobros**, para uso de
 - Decir con claridad qué se probó y qué no. Que compile no significa que funcione: lo prueba David en su celular y su PC.
 
 **Pendiente de la Fase 1:**
-- Falta anotar los tiempos exactos con el PDF de 500 MB de David. Él confirmó que se siente rápido, pero no hay números.
-- No se ha probado con un escaneado de 1000 hojas.
+- Tiempos del PDF de 500 MB y escaneado de 1000 hojas: David los dio por hechos el 2026-11-02.
 - El letrero de tiempos se quitó en la 0.1.4.
 - Probado en el celular el 2026-11-02 (0.1.5): reabrir el último PDF, doble toque, deslizar el panel, "Atrás" y los avisos funcionaron.
 
@@ -84,7 +83,7 @@ Un lector de PDF **gratis, sin anuncios, sin rastreo y sin cobros**, para uso de
 De estos cuatro, ya están el 1, el 3 y el 4. Falta el 2.
 
 1. **Buscar texto en el documento** (hecho en 0.1.3). `Page::search` de la crate `mupdf` devuelve dónde está cada resultado. Los escaneados no tienen texto: se avisa con un mensaje claro hasta que exista el OCR de la Fase 6.
-2. **Compartir el archivo abierto desde la app.** En Android, con el menú de compartir del sistema. Windows no tiene un menú igual: proponerle a David qué hacer ahí antes de programarlo.
+2. **Compartir el archivo abierto desde la app.** Android: menú de compartir del sistema. Windows: David eligió mostrar el archivo en el Explorador con el PDF seleccionado (desde ahí lo envía).
 3. **Al abrir la app, volver a abrir el último archivo** (hecho en 0.1.3).
 4. **Lista de los últimos archivos abiertos** (hecho en 0.1.3).
 
