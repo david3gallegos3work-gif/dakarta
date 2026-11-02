@@ -46,9 +46,9 @@ Un lector de PDF **gratis, sin anuncios, sin rastreo y sin cobros**, para uso de
 
 ## Estado actual
 
-**Fase 1 terminada y probada por David** (versión 0.1.2, noviembre de 2026). En git, la marca `fin-fase-1-claude` señala el punto exacto donde quedó. No la muevas ni la borres: David la usará para revisar lo que se haga después.
+**Fase 1 terminada y probada por David** (versión 0.1.2, noviembre de 2026). En git, la marca `fin-fase-1-claude` señala el punto exacto donde quedó. No la muevas ni la borres: David la usará para revisar lo que se haga después. Después llegaron buscar texto, últimos archivos y la reapertura del último PDF (0.1.3), y el selector de Android con permiso guardable, los gestos y "Atrás" (0.1.4).
 
-**Lo que ya funciona (Android y Windows):** abrir PDF sin cargarlo entero, pasar páginas, zoom (dos dedos, Ctrl + rueda, botones), índice, modo noche, "Abrir con Dakarta" / lector predeterminado y aviso de versión nueva.
+**Lo que ya funciona (Android y Windows):** abrir PDF sin cargarlo entero, pasar páginas, zoom (dos dedos, Ctrl + rueda, botones, doble toque normal/máximo), índice, buscar texto, últimos archivos, reabrir el último, modo noche, "Abrir con Dakarta" / lector predeterminado y aviso de versión nueva.
 
 **Motor:** la Opción A (crate `mupdf` en Rust) compila y funciona en Android, así que la Opción B queda descartada.
 
@@ -76,18 +76,19 @@ Un lector de PDF **gratis, sin anuncios, sin rastreo y sin cobros**, para uso de
 **Pendiente de la Fase 1:**
 - Falta anotar los tiempos exactos con el PDF de 500 MB de David. Él confirmó que se siente rápido, pero no hay números.
 - No se ha probado con un escaneado de 1000 hojas.
-- El letrero de tiempos, abajo a la derecha, era para medir. Preguntarle a David si lo quitamos.
+- El letrero de tiempos se quitó en la 0.1.4.
+- Probar en el celular real: reabrir el último PDF después de cerrar la app del todo, y los gestos nuevos (doble toque, deslizar el panel, "Atrás").
 
 ## Pedidos nuevos de David (siguiente etapa)
 
-David quiere estos cuatro además de la Fase 2. Preguntarle en qué orden los hace.
+De estos cuatro, ya están el 1, el 3 y el 4. Falta el 2.
 
-1. **Buscar texto en el documento.** Estaba en la Fase 6 y David lo quiere antes. `Page::search` de la crate `mupdf` devuelve dónde está cada resultado. Los escaneados no tienen texto: avisarlo con un mensaje claro hasta que exista el OCR de la Fase 6.
+1. **Buscar texto en el documento** (hecho en 0.1.3). `Page::search` de la crate `mupdf` devuelve dónde está cada resultado. Los escaneados no tienen texto: se avisa con un mensaje claro hasta que exista el OCR de la Fase 6.
 2. **Compartir el archivo abierto desde la app.** En Android, con el menú de compartir del sistema. Windows no tiene un menú igual: proponerle a David qué hacer ahí antes de programarlo.
-3. **Al abrir la app, volver a abrir el último archivo.**
-4. **Lista de los últimos archivos abiertos.**
+3. **Al abrir la app, volver a abrir el último archivo** (hecho en 0.1.3).
+4. **Lista de los últimos archivos abiertos** (hecho en 0.1.3).
 
-**Cuidado con 3 y 4 en Android:** el permiso para leer un `content://` puede ser temporal, y no está comprobado que siga valiendo después de cerrar la app, sobre todo con archivos que llegan desde WhatsApp o Gmail. Probarlo en el celular real, cerrando la app del todo. Si un archivo ya no se puede abrir, mostrar un mensaje claro y no dejar la app en blanco. No copiar los PDF pesados a la app sin preguntarle a David, porque su PDF pesa 500 MB.
+**Cuidado con 3 y 4 en Android:** el permiso para leer un `content://` puede ser temporal. Desde la 0.1.4 el selector de Android ("Abrir") guarda el permiso para siempre; los archivos que llegan con "Abrir con" desde WhatsApp o Gmail a veces no lo permiten, y en ese caso se muestra un aviso claro y se quitan de la lista. No copiar los PDF pesados a la app sin preguntarle a David, porque su PDF pesa 500 MB; quedó pendiente decidir si se copian los de WhatsApp/Gmail para que también se reabran.
 
 ## Plan por etapas
 

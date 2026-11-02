@@ -20,12 +20,20 @@ export function leerRecientes(): Reciente[] {
   }
 }
 
-export function guardarReciente(lista: Reciente[], nuevo: Reciente): Reciente[] {
-  const siguientes = agregarReciente(lista, nuevo)
+function guardar(lista: Reciente[]): Reciente[] {
   try {
-    localStorage.setItem(CLAVE, JSON.stringify(siguientes))
+    localStorage.setItem(CLAVE, JSON.stringify(lista))
   } catch {
     // sin almacenamiento: la lista no se recuerda al volver a abrir
   }
-  return siguientes
+  return lista
+}
+
+export function guardarReciente(lista: Reciente[], nuevo: Reciente): Reciente[] {
+  return guardar(agregarReciente(lista, nuevo))
+}
+
+/** Un archivo que ya no se puede abrir se quita, para que no falle en cada arranque. */
+export function olvidarReciente(lista: Reciente[], ruta: string): Reciente[] {
+  return guardar(lista.filter((r) => r.ruta !== ruta))
 }
