@@ -76,8 +76,9 @@ jobs:
       - run: npx tauri icon assets/icono.png
       - name: Compilar el APK
         run: |
-          # MuPDF genera su enlace con Rust leyendo los encabezados de Android que trae el NDK.
-          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--sysroot=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          # MuPDF genera su enlace con Rust leyendo los encabezados de Android que trae el NDK
+          # (el NDK exige la versión mínima de Android en el destino: 24, la misma de Tauri).
+          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--sysroot=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot --target=aarch64-linux-android24"
           npx tauri android build --apk --target aarch64
       - name: Firmar el APK
         env:
