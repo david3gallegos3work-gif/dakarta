@@ -49,6 +49,11 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .indice .abrir-indice { width: calc(100% - 16px); margin: 8px; border-radius: 6px; background: #1565c0; color: #fff; text-align: center; }
 .indice .abrir-indice:hover { background: #0d47a1; }
 .indice p { padding: 12px; color: #666; }
+.recientes-panel { margin: 0 8px 8px; padding: 8px; border-radius: 8px; background: #f5f8fc; }
+.recientes-panel h2 { margin: 0 0 6px; font-size: 14px; color: #455a64; }
+.recientes-panel ul { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.recientes-panel button { width: 100%; padding: 8px 10px; overflow: hidden; border: 1px solid #cfd8e3; border-radius: 6px; background: #fff; color: inherit; font: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.recientes-panel button:hover { background: #e3f2fd; }
 /* Celular: el índice se abre encima de las páginas. */
 @media (max-width: 699px) {
   .indice { position: absolute; z-index: 2; top: 0; bottom: 0; left: 0; box-shadow: 2px 0 12px rgba(0, 0, 0, 0.3); }
@@ -84,3 +89,7 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .noche .buscar-nota { color: #bbb; }
 .noche .recientes button { background: #242424; border-color: #3a3a3a; }
 .noche .recientes button:hover { background: #2f2f2f; }
+.noche .recientes-panel { background: #242424; }
+.noche .recientes-panel h2 { color: #bbb; }
+.noche .recientes-panel button { background: #2f2f2f; border-color: #3a3a3a; }
+.noche .recientes-panel button:hover { background: #3a3a3a; }
