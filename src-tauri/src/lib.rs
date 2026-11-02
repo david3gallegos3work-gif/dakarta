@@ -1,9 +1,36 @@
 mod cache;
 mod motor;
 
+use std::sync::Mutex;
+
 use motor::{Info, Motor};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
+use tauri_plugin_opener::OpenerExt;
+
+/// Windows: el PDF con el que se abrió la app (doble clic o "Abrir con"). Se entrega una sola vez.
+struct Inicial(Mutex<Option<String>>);
+
+#[tauri::command]
+fn archivo_inicial(inicial: State<'_, Inicial>) -> Option<String> {
+    inicial.0.lock().ok()?.take()
+}
+
+/// "Abrir con Dakarta": en Windows llega una ruta; en Android, un content://.
+#[tauri::command]
+async fn abrir_ruta(app: AppHandle, motor: State<'_, Motor>, ruta: String) -> Result<Info, String> {
+    let ruta = ruta.parse::<FilePath>().map_err(|e| e.to_string())?;
+    abrir(&app, &motor, ruta)
+}
+
+/// Abre en el navegador la descarga de una versión nueva; solo las de Dakarta.
+#[tauri::command]
+fn descargar_version(app: AppHandle, url: String) -> Result<(), String> {
+    if !url.starts_with("https://github.com/david3gallegos3work-gif/dakarta/releases/") {
+        return Err("Enlace de descarga no válido.".into());
+    }
+    app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+}
 
 #[tauri::command]
 async fn elegir_pdf(app: AppHandle, motor: State<'_, Motor>) -> Result<Option<Info>, String> {
@@ -51,11 +78,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(Motor::nuevo())
+        .manage(Inicial(Mutex::new(std::env::args().nth(1).filter(|a| !a.starts_with('-')))))
         .register_asynchronous_uri_scheme_protocol("pagina", |ctx, pedido, resp| {
             ctx.app_handle().state::<Motor>().pagina(pedido.uri(), resp)
         })
-        .invoke_handler(tauri::generate_handler![elegir_pdf])
+        .invoke_handler(tauri::generate_handler![elegir_pdf, archivo_inicial, abrir_ruta, descargar_version])
         .run(tauri::generate_context!())
         .expect("no se pudo iniciar Dakarta");
 }

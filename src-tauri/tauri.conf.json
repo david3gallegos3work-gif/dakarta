@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Dakarta",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "io.github.dakarta",
   "build": {
     "frontendDist": "../dist",
@@ -25,6 +25,15 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "fileAssociations": [
+      {
+        "ext": ["pdf"],
+        "name": "Documento PDF",
+        "description": "Documento PDF",
+        "role": "Viewer",
+        "mimeType": "application/pdf"
+      }
+    ],
     "license": "AGPL-3.0-or-later",
     "copyright": "Dakarta. Motor PDF: MuPDF © Artifex Software, Inc. (AGPL-3.0)",
     "icon": [

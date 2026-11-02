@@ -78,6 +78,7 @@ jobs:
           f=$(find src-tauri/gen/android -name MainActivity.kt)
           sed -i 's/enableEdgeToEdge()/enableEdgeToEdge(androidx.activity.SystemBarStyle.dark(0), androidx.activity.SystemBarStyle.dark(0))/' "$f"
           grep -q 'SystemBarStyle.dark' "$f" || { echo "::error::No se pudo ajustar la barra de estado"; cat "$f"; exit 1; }
+      - run: python3 scripts/parchar-android.py
       - run: npx tauri icon assets/icono.png
       - name: Compilar el APK
         run: |

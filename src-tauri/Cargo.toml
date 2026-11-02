@@ -1,6 +1,6 @@
 [package]
 name = "dakarta"
-version = "0.1.0"
+version = "0.1.1"
 description = "Dakarta: lector de PDF sin anuncios"
 license = "AGPL-3.0-or-later"
 edition = "2024"
@@ -18,6 +18,8 @@ tauri = "2.12.5"
 tauri-plugin-dialog = "2.8"
 # En Android abre el PDF que llega como content:// (WhatsApp, Descargas…) sin copiarlo entero.
 tauri-plugin-fs = "2.7"
+# Abre en el navegador la descarga de una versión nueva.
+tauri-plugin-opener = "2.7"
 serde = { version = "1", features = ["derive"] }
 # Motor PDF: MuPDF de Artifex Software (AGPL). Sin OCR ni JavaScript por ahora: compila más rápido y la app pesa menos.
 mupdf = { version = "0.8", default-features = false, features = ["base14-fonts"] }
