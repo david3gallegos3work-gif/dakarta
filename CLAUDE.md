@@ -14,6 +14,10 @@ Las reglas generales están en `~/.claude/CLAUDE.md`; aquí solo lo de este proy
 - Verificar antes de decir "listo": `npm test` y `npm run build` (si hay RAM), y que la compilación de Actions termine en verde.
 - La PC tiene poca RAM: nada de `tauri dev` ni compilar Rust localmente.
 
+## Revisar lo que hizo otra IA
+- La marca de git `fin-fase-1-claude` es donde Claude dejó la Fase 1. David siguió con DeepSeek para comparar qué tan confiable es.
+- Si pide revisar ese trabajo: mirar `git log` y `git diff fin-fase-1-claude..HEAD`, comprobar que compile y pase las pruebas, y compararlo con lo pedido en `AGENTS.md`. Decirle en palabras simples qué quedó bien, qué quedó mal y qué falta probar en su celular.
+
 ## Cómo está armado
 - `src-tauri/src/motor.rs`: un solo hilo con MuPDF; pinta páginas a JPEG y las entrega por el protocolo `pagina://` (no base64 por IPC).
 - `src-tauri/src/lib.rs`: elegir y abrir el archivo (en Android el content:// se abre por su descriptor, sin copiarlo).
