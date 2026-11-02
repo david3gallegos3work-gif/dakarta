@@ -44,6 +44,51 @@ Un lector de PDF **gratis, sin anuncios, sin rastreo y sin cobros**, para uso de
 - En Windows, poder asociarse a los archivos .pdf.
 - Aviso de actualización dentro de la app, igual que en Datheke (busca el APK/.exe nuevo en las Releases de GitHub).
 
+## Estado actual
+
+**Fase 1 terminada y probada por David** (versión 0.1.2, noviembre de 2026). En git, la marca `fin-fase-1-claude` señala el punto exacto donde quedó. No la muevas ni la borres: David la usará para revisar lo que se haga después.
+
+**Lo que ya funciona (Android y Windows):** abrir PDF sin cargarlo entero, pasar páginas, zoom (dos dedos, Ctrl + rueda, botones), índice, modo noche, "Abrir con Dakarta" / lector predeterminado y aviso de versión nueva.
+
+**Motor:** la Opción A (crate `mupdf` en Rust) compila y funciona en Android, así que la Opción B queda descartada.
+
+**Cómo está armado:**
+- `src-tauri/src/motor.rs`: un solo hilo tiene el documento de MuPDF y atiende los pedidos; primero lo más reciente. Entrega JPEG por el protocolo `pagina://`.
+- `src-tauri/src/cache.rs`: guarda las últimas hojas pintadas, con tope de memoria.
+- `src-tauri/src/lib.rs`: elegir y abrir archivos. En Android el `content://` se abre por su descriptor (`/proc/self/fd`), sin copiarlo; solo se copia si no se puede leer así.
+- `src/App.tsx`: cada página tiene capas: miniatura (se queda al pasar), hoja entera (hasta 2048 px) y, con más zoom, un recorte de lo visible.
+- `src/zoom.ts`: cálculos del zoom y los recortes. `src/version.ts`: aviso de versión nueva.
+- `scripts/parchar-android.py`: agrega "Abrir con" al proyecto Android, que se genera en cada compilación.
+
+**Cómo compilar y publicar:**
+- David no tiene Rust en su PC, y la PC tiene poca memoria: no compilar Rust allí ni instalar Rust ni Android Studio.
+- Antes de publicar, subir el número de versión en `src-tauri/tauri.conf.json` y `src-tauri/Cargo.toml`. Con el número viejo, los archivos reemplazan a los de esa versión y la app instalada no avisa de nada.
+- Compilar con `gh workflow run compilar.yml -f plataforma=ambas`. El APK se firma con los secretos de GitHub que ya existen; no crear otra clave de firma, porque las actualizaciones dejarían de instalarse encima.
+- Pruebas: `npm test` y `rustc --edition 2024 --test src-tauri/src/cache.rs`. Las dos corren en cada compilación.
+
+**Cómo trabajar con David:**
+- Hablarle en español de Ecuador, con "tú" y palabras simples. Nunca voseo, tampoco en los textos de la app.
+- Subir a GitHub solo cuando diga "sube".
+- `git add` archivo por archivo, nunca `-A` ni `.`.
+- Un commit por cada cosa terminada, con un mensaje que diga qué se hizo.
+- Decir con claridad qué se probó y qué no. Que compile no significa que funcione: lo prueba David en su celular y su PC.
+
+**Pendiente de la Fase 1:**
+- Falta anotar los tiempos exactos con el PDF de 500 MB de David. Él confirmó que se siente rápido, pero no hay números.
+- No se ha probado con un escaneado de 1000 hojas.
+- El letrero de tiempos, abajo a la derecha, era para medir. Preguntarle a David si lo quitamos.
+
+## Pedidos nuevos de David (siguiente etapa)
+
+David quiere estos cuatro además de la Fase 2. Preguntarle en qué orden los hace.
+
+1. **Buscar texto en el documento.** Estaba en la Fase 6 y David lo quiere antes. `Page::search` de la crate `mupdf` devuelve dónde está cada resultado. Los escaneados no tienen texto: avisarlo con un mensaje claro hasta que exista el OCR de la Fase 6.
+2. **Compartir el archivo abierto desde la app.** En Android, con el menú de compartir del sistema. Windows no tiene un menú igual: proponerle a David qué hacer ahí antes de programarlo.
+3. **Al abrir la app, volver a abrir el último archivo.**
+4. **Lista de los últimos archivos abiertos.**
+
+**Cuidado con 3 y 4 en Android:** el permiso para leer un `content://` puede ser temporal, y no está comprobado que siga valiendo después de cerrar la app, sobre todo con archivos que llegan desde WhatsApp o Gmail. Probarlo en el celular real, cerrando la app del todo. Si un archivo ya no se puede abrir, mostrar un mensaje claro y no dejar la app en blanco. No copiar los PDF pesados a la app sin preguntarle a David, porque su PDF pesa 500 MB.
+
 ## Plan por etapas
 
 1. **Fase 1 — Prueba de velocidad:** abrir PDFs, pasar páginas, zoom, índice, modo noche. Medir tiempos con el PDF más pesado de David (idealmente un escaneado de 1000 hojas). Si va lento, corregir aquí antes de seguir.
