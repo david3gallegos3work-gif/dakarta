@@ -1,0 +1,15 @@
+node_modules
+dist
+*.log
+.env*
+*.local
+
+# Tauri: compilación y archivos generados en GitHub Actions
+src-tauri/target
+src-tauri/gen
+src-tauri/icons
+
+# Claves de firma: nunca en el repositorio
+*.jks
+*.keystore
+client_secret*.json

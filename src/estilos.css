@@ -1,0 +1,54 @@
+:root {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: #1a1a1a;
+  -webkit-tap-highlight-color: transparent;
+}
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; height: 100%; overflow: hidden; }
+
+.app { height: 100dvh; display: flex; flex-direction: column; }
+
+/* En el celular la app se dibuja bajo la barra de estado: se deja su espacio (en la PC vale 0). */
+.barra { display: flex; align-items: center; gap: 2px; padding: calc(6px + env(safe-area-inset-top)) 6px 6px; background: #1565c0; color: #fff; white-space: nowrap; }
+.barra button { min-width: 36px; height: 36px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 17px; cursor: pointer; }
+.barra button:hover, .barra button[aria-pressed='true'] { background: rgba(255, 255, 255, 0.2); }
+.barra button:disabled { opacity: 0.6; }
+.barra .porcentaje { font-size: 13px; padding: 0 4px; }
+.barra .derecha { margin-left: auto; }
+.pag { display: flex; align-items: center; gap: 4px; margin: 0 4px 0 auto; font-size: 14px; }
+.pag input { width: 54px; height: 30px; border: 0; border-radius: 4px; text-align: center; font: inherit; }
+
+.cuerpo { position: relative; flex: 1; min-height: 0; display: flex; }
+.visor { flex: 1; overflow: auto; background: #525659; touch-action: pan-x pan-y; overscroll-behavior: contain; }
+.contenido { position: relative; width: max-content; min-width: 100%; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); }
+.pagina { display: flex; align-items: center; justify-content: center; margin: 0 auto 8px; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+.pagina img { display: block; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none; }
+.numero { color: #888; font-size: 14px; }
+
+.indice { flex: none; width: min(320px, 85vw); overflow: auto; padding: 8px 0; background: #fff; border-right: 1px solid #ddd; }
+.indice ul { list-style: none; margin: 0; padding-left: 12px; }
+.indice > ul { padding-left: 0; }
+.indice button { display: block; width: 100%; padding: 8px 12px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.indice button:hover { background: rgba(0, 0, 0, 0.06); }
+.indice button:disabled { opacity: 0.5; cursor: default; }
+.indice p { padding: 12px; color: #666; }
+/* Celular: el índice se abre encima de las páginas. */
+@media (max-width: 699px) {
+  .indice { position: absolute; z-index: 2; top: 0; bottom: 0; left: 0; box-shadow: 2px 0 12px rgba(0, 0, 0, 0.3); }
+}
+
+.bienvenida { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; overflow: auto; background: #fff; text-align: center; }
+.bienvenida img { width: min(360px, 80vw); height: auto; }
+.grande { padding: 14px 28px; border: 0; border-radius: 8px; background: #1565c0; color: #fff; font: inherit; font-size: 18px; cursor: pointer; }
+.creditos { max-width: 420px; color: #666; font-size: 13px; }
+.error { color: #b71c1c; }
+.aviso-error { position: absolute; z-index: 3; top: 8px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px); padding: 8px 12px; border: 0; border-radius: 8px; background: #ffebee; color: #b71c1c; font: inherit; }
+.tiempos { position: absolute; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); padding: 4px 8px; border-radius: 12px; background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 12px; pointer-events: none; }
+
+/* Modo noche: la página se invierte (fondo oscuro, letras claras) y se corrigen los colores de las fotos. */
+.noche .barra { background: #111; }
+.noche .visor { background: #1e1e1e; }
+.noche .pagina { background: #222; }
+.noche .pagina img { filter: invert(1) hue-rotate(180deg); }
+.noche .bienvenida, .noche .indice { background: #1a1a1a; color: #eee; border-color: #333; }
+.noche .indice button:hover { background: rgba(255, 255, 255, 0.08); }
