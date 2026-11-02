@@ -21,9 +21,11 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .cuerpo { position: relative; flex: 1; min-height: 0; display: flex; }
 .visor { flex: 1; overflow: auto; background: #525659; touch-action: pan-x pan-y; overscroll-behavior: contain; }
 .contenido { position: relative; width: max-content; min-width: 100%; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); }
-.pagina { display: flex; align-items: center; justify-content: center; margin: 0 auto 8px; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
-.pagina img { display: block; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none; }
+.pagina { position: relative; display: flex; align-items: center; justify-content: center; margin: 0 auto 8px; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+/* La imagen nítida se pinta encima de la miniatura. */
+.pagina img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none; }
 .numero { color: #888; font-size: 14px; }
+.fallo { position: absolute; z-index: 1; padding: 4px 8px; border-radius: 4px; background: #ffebee; color: #b71c1c; font-size: 14px; }
 
 .indice { flex: none; width: min(320px, 85vw); overflow: auto; padding: 8px 0; background: #fff; border-right: 1px solid #ddd; }
 .indice ul { list-style: none; margin: 0; padding-left: 12px; }

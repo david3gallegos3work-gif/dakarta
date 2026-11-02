@@ -1,5 +1,7 @@
 export const ZOOM_MIN = 0.25
 export const ZOOM_MAX = 6
+/** Ancho de las miniaturas que se ven mientras se desplaza (el mismo valor en motor.rs). */
+export const MINIATURA = 384
 
 export const limitarZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z))
 
