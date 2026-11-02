@@ -3,6 +3,7 @@ use std::fs::File;
 use std::sync::mpsc::{self, Sender};
 use std::time::Instant;
 
+use mupdf::text_page::TextExtractOptions;
 use mupdf::{Colorspace, Device, Document, Matrix, Outline, Pixmap};
 use serde::Serialize;
 use tauri::UriSchemeResponder;
@@ -18,6 +19,33 @@ pub struct Info {
     alto: f32,
     indice: Vec<Entrada>,
     ms: u128,
+    /// Para volver a abrirlo después (ruta en Windows, content:// en Android).
+    ruta: String,
+    nombre: String,
+}
+
+impl Info {
+    pub fn completar(&mut self, ruta: String, nombre: String) {
+        self.ruta = ruta;
+        self.nombre = nombre;
+    }
+}
+
+#[derive(Serialize)]
+pub struct Busqueda {
+    resultados: Vec<Coincidencia>,
+    /// El PDF no tiene texto (parece escaneado): no hay nada que buscar.
+    escaneado: bool,
+}
+
+#[derive(Serialize)]
+struct Coincidencia {
+    pagina: i32,
+    /// Caja del texto encontrado, en fracción de la página (0 a 1).
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
 }
 
 #[derive(Serialize)]
@@ -51,6 +79,7 @@ struct PedidoPagina {
 
 enum Pedido {
     Abrir { ruta: String, archivo: Option<File>, resp: Sender<Result<Info, String>> },
+    Buscar { texto: String, resp: Sender<Result<Busqueda, String>> },
     Pagina(PedidoPagina),
 }
 
@@ -87,6 +116,13 @@ impl Motor {
                                 }
                                 info
                             });
+                            let _ = resp.send(r);
+                        }
+                        Pedido::Buscar { texto, resp } => {
+                            let r = match &abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => buscar_doc(doc, &texto),
+                            };
                             let _ = resp.send(r);
                         }
                         Pedido::Pagina(p) => pendientes.push(p),
@@ -134,6 +170,12 @@ impl Motor {
         rx.recv().map_err(texto)?
     }
 
+    pub fn buscar(&self, texto: String) -> Result<Busqueda, String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Buscar { texto, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
     /// Pedido de la pantalla: pagina://localhost/<n>?w=<ancho en píxeles>
     /// Para un recorte, además: h=<alto de la página>, x, y, cw, ch (el pedazo, en píxeles).
     pub fn pagina(&self, uri: &Uri, resp: UriSchemeResponder) {
@@ -167,7 +209,15 @@ fn abrir_doc(ruta: &str) -> Result<(Document, Info), String> {
     }
     let b = doc.load_page(0).and_then(|p| p.bounds()).map_err(texto)?;
     let indice = doc.outlines().map(|o| entradas(&o)).unwrap_or_default();
-    let info = Info { paginas, ancho: b.width(), alto: b.height(), indice, ms: t.elapsed().as_millis() };
+    let info = Info {
+        paginas,
+        ancho: b.width(),
+        alto: b.height(),
+        indice,
+        ms: t.elapsed().as_millis(),
+        ruta: String::new(),
+        nombre: String::new(),
+    };
     Ok((doc, info))
 }
 
@@ -179,6 +229,43 @@ fn entradas(o: &[Outline]) -> Vec<Entrada> {
             hijos: entradas(&e.down),
         })
         .collect()
+}
+
+/// Busca en todas las páginas. Las cajas vuelven en fracción de la página, para pintarlas encima sin depender del zoom.
+fn buscar_doc(doc: &Document, aguja: &str) -> Result<Busqueda, String> {
+    let aguja = aguja.trim();
+    if aguja.is_empty() {
+        return Err("Escribe qué buscar.".into());
+    }
+    let paginas = doc.page_count().map_err(texto)?;
+    let mut resultados = Vec::new();
+    let mut tiene_texto = false;
+    for n in 0..paginas {
+        let pagina = doc.load_page(n).map_err(texto)?;
+        let b = pagina.bounds().map_err(texto)?;
+        if b.width() <= 0.0 || b.height() <= 0.0 {
+            continue;
+        }
+        // Solo se mira si hay texto mientras no se haya encontrado: el aviso de escaneado no cuesta en PDFs normales.
+        if !tiene_texto {
+            tiene_texto = !pagina.text(TextExtractOptions::default()).map_err(texto)?.trim().is_empty();
+        }
+        let quads = pagina.search(aguja, 500).map_err(texto)?;
+        for q in quads.iter() {
+            let x0 = q.ul.x.min(q.ll.x).min(q.ur.x).min(q.lr.x);
+            let x1 = q.ul.x.max(q.ll.x).max(q.ur.x).max(q.lr.x);
+            let y0 = q.ul.y.min(q.ll.y).min(q.ur.y).min(q.lr.y);
+            let y1 = q.ul.y.max(q.ll.y).max(q.ur.y).max(q.lr.y);
+            resultados.push(Coincidencia {
+                pagina: n,
+                x: ((x0 - b.x0) / b.width()).clamp(0.0, 1.0),
+                y: ((y0 - b.y0) / b.height()).clamp(0.0, 1.0),
+                w: ((x1 - x0) / b.width()).clamp(0.0, 1.0),
+                h: ((y1 - y0) / b.height()).clamp(0.0, 1.0),
+            });
+        }
+    }
+    Ok(Busqueda { resultados, escaneado: resultados.is_empty() && !tiene_texto })
 }
 
 fn pintar(doc: &Document, n: i32, ancho: u32) -> Result<Vec<u8>, String> {
