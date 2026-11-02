@@ -18,3 +18,5 @@ Las reglas generales están en `~/.claude/CLAUDE.md`; aquí solo lo de este proy
 - `src-tauri/src/motor.rs`: un solo hilo con MuPDF; pinta páginas a JPEG y las entrega por el protocolo `pagina://` (no base64 por IPC).
 - `src-tauri/src/lib.rs`: elegir y abrir el archivo (en Android el content:// se abre por su descriptor, sin copiarlo).
 - `src/App.tsx`: solo pide al motor las páginas cercanas a la pantalla; zoom con dos dedos, Ctrl+rueda o botones.
+- Cada página tiene capas: miniatura (se queda), hoja entera (hasta 2048 px) y, con más zoom, un recorte de lo visible (`src/zoom.ts`).
+- Releases: cada archivo va con número (para el aviso de la app, `src/version.ts`) y sin número (enlace fijo). `scripts/parchar-android.py` agrega "Abrir con".

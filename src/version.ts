@@ -21,7 +21,8 @@ export async function buscarActualizacion(): Promise<Actualizacion | null> {
     if (!r.ok) return null
     const ultima: { tag_name: string; assets: { name: string; browser_download_url: string }[] } = await r.json()
     const version = ultima.tag_name.replace(/^v/, '')
-    const nombre = /android/i.test(navigator.userAgent) ? 'Dakarta.apk' : 'Dakarta-Windows.exe'
+    // Con su número en el nombre: el navegador no lo confunde con la versión ya descargada.
+    const nombre = /android/i.test(navigator.userAgent) ? `Dakarta-${version}.apk` : `Dakarta-Windows-${version}.exe`
     // Mientras se publica, una versión puede tener aún solo uno de los dos archivos: se avisa cuando esté el de este aparato.
     const archivo = ultima.assets.find((a) => a.name === nombre)
     return archivo && esMasNueva(version, await getVersion()) ? { version, url: archivo.browser_download_url } : null

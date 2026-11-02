@@ -1,5 +1,6 @@
 # Compila Dakarta en la nube y publica el APK y el .exe en Releases.
 # Solo a mano (Actions → "Compilar" → Run workflow) o con: gh workflow run compilar.yml -f plataforma=ambas
+# Antes de publicar una versión nueva, subir el número en tauri.conf.json y Cargo.toml.
 name: Compilar
 
 on:
@@ -44,8 +45,10 @@ jobs:
         run: |
           V=$(node -p "require('./src-tauri/tauri.conf.json').version")
           cp src-tauri/target/release/bundle/nsis/*.exe Dakarta-Windows.exe
-          gh release create "v$V" --title "Dakarta $V" --notes "Celular Android: descarga Dakarta.apk. Windows: descarga Dakarta-Windows.exe." 2>/dev/null || true
-          gh release upload "v$V" Dakarta-Windows.exe --clobber
+          cp Dakarta-Windows.exe "Dakarta-Windows-$V.exe"
+          gh release create "v$V" --title "Dakarta $V" --notes "Celular Android: descarga Dakarta-$V.apk. Windows: descarga Dakarta-Windows-$V.exe." 2>/dev/null || true
+          # Con número para el aviso de la app; sin número para el enlace fijo de la primera instalación.
+          gh release upload "v$V" Dakarta-Windows.exe "Dakarta-Windows-$V.exe" --clobber
 
   android:
     if: inputs.plataforma != 'windows'
@@ -103,5 +106,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           V=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          gh release create "v$V" --title "Dakarta $V" --notes "Celular Android: descarga Dakarta.apk. Windows: descarga Dakarta-Windows.exe." 2>/dev/null || true
-          gh release upload "v$V" Dakarta.apk --clobber
+          cp Dakarta.apk "Dakarta-$V.apk"
+          gh release create "v$V" --title "Dakarta $V" --notes "Celular Android: descarga Dakarta-$V.apk. Windows: descarga Dakarta-Windows-$V.exe." 2>/dev/null || true
+          # Con número para el aviso de la app; sin número para el enlace fijo de la primera instalación.
+          gh release upload "v$V" Dakarta.apk "Dakarta-$V.apk" --clobber

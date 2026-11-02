@@ -2,7 +2,7 @@ import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import logo from '../assets/logo.jpg'
 import { buscarActualizacion, type Actualizacion } from './version.ts'
-import { cubeta, limitarZoom, MINIATURA } from './zoom.ts'
+import { ANCHO_ENTERA_MAX, anchoEntera, imanZoom, limitarZoom, MINIATURA, recorte, type Recorte } from './zoom.ts'
 
 declare global {
   interface Window {
@@ -56,6 +56,7 @@ export default function App() {
   const [centro, setCentro] = useState(0)
   const [visibles, setVisibles] = useState<Rango>([0, 0])
   const [cercanas, setCercanas] = useState<Rango>([0, 0])
+  const [recortes, setRecortes] = useState<Recorte[]>([])
   const [anchoVisor, setAnchoVisor] = useState(0)
   const [msPagina, setMsPagina] = useState<number | null>(null)
   const [nueva, setNueva] = useState<Actualizacion | null>(null)
@@ -86,7 +87,22 @@ export default function App() {
     const h = hijos()
     if (!h.length) return
     const { scrollTop: y, clientHeight: alto } = v
-    fijar(setVisibles, buscarPagina(h, y), buscarPagina(h, y + alto))
+    const a = buscarPagina(h, y)
+    const b = buscarPagina(h, y + alto)
+    fijar(setVisibles, a, b)
+    // Con mucho zoom la hoja entera no alcanza: se pide con su detalle exacto solo lo que se está mirando.
+    const vista = { x: v.scrollLeft, y, w: v.clientWidth, h: alto }
+    setRecortes((previos) => {
+      const lista: Recorte[] = []
+      for (let n = a; n <= b; n++) {
+        const el = h[n]
+        if (el.offsetWidth * devicePixelRatio <= ANCHO_ENTERA_MAX) continue
+        const caja = { x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight }
+        const r = recorte(n, caja, vista, devicePixelRatio, previos.find((p) => p.n === n))
+        if (r) lista.push(r)
+      }
+      return lista
+    })
     clearTimeout(relojVecinas.current)
     relojVecinas.current = window.setTimeout(
       () => fijar(setCercanas, buscarPagina(h, y - alto), buscarPagina(h, y + 2 * alto)),
@@ -109,33 +125,34 @@ export default function App() {
         return
       }
       if (h.length && movido < v.clientHeight) fijar(setVisibles, buscarPagina(h, y), buscarPagina(h, y + v.clientHeight))
-      reloj.current = window.setTimeout(seguir, 150)
+      reloj.current = window.setTimeout(seguir, 100)
     },
     [aterrizar],
   )
 
-  const anclar = useCallback((vx: number, vy: number) => {
-    const v = visor.current!
+  /** El punto (px, py) del contenido debe quedar en el punto (vx, vy) de la pantalla tras el próximo cambio de tamaño. */
+  const anclar = useCallback((px: number, py: number, vx: number, vy: number) => {
     const h = hijos()
     if (!h.length) return
-    const i = buscarPagina(h, v.scrollTop + vy)
+    const i = buscarPagina(h, py)
     const el = h[i]
-    ajuste.current = {
-      i,
-      vx,
-      vy,
-      fx: (v.scrollLeft + vx - el.offsetLeft) / el.offsetWidth,
-      fy: (v.scrollTop + vy - el.offsetTop) / el.offsetHeight,
-    }
+    ajuste.current = { i, vx, vy, fx: (px - el.offsetLeft) / el.offsetWidth, fy: (py - el.offsetTop) / el.offsetHeight }
   }, [])
 
   /** Devuelve false si el zoom no cambió (ya estaba en el tope). */
   const cambiarZoom = useCallback(
-    (pedido: number, vx?: number, vy?: number) => {
-      const v = visor.current!
-      const z = limitarZoom(pedido)
+    (
+      pedido: number,
+      vx = visor.current!.clientWidth / 2,
+      vy = visor.current!.clientHeight / 2,
+      px = visor.current!.scrollLeft + vx,
+      py = visor.current!.scrollTop + vy,
+    ) => {
+      const z = imanZoom(limitarZoom(pedido))
       if (z === zoomRef.current) return false
-      anclar(vx ?? v.clientWidth / 2, vy ?? v.clientHeight / 2)
+      anclar(px, py, vx, vy)
+      // Ya, sin esperar a pintar: varios pasos seguidos de la rueda se suman en vez de perderse.
+      zoomRef.current = z
       setZoom(z)
       return true
     },
@@ -146,6 +163,7 @@ export default function App() {
     const v = visor.current!
     const a = ajuste.current
     contenido.current!.style.transform = ''
+    contenido.current!.style.willChange = ''
     const el = a && hijos()[a.i]
     if (a && el) {
       v.scrollLeft = el.offsetLeft + a.fx * el.offsetWidth - a.vx
@@ -159,12 +177,17 @@ export default function App() {
   useEffect(() => {
     const v = visor.current!
     const ro = new ResizeObserver(() => {
-      anclar(0, 0)
+      anclar(v.scrollLeft, v.scrollTop, 0, 0)
       setAnchoVisor(v.clientWidth)
     })
     ro.observe(v)
-    return () => ro.disconnect()
-  }, [anclar])
+    // Apenas termina de desplazarse se pide lo nítido, sin esperar al siguiente repaso del reloj.
+    v.addEventListener('scrollend', aterrizar)
+    return () => {
+      ro.disconnect()
+      v.removeEventListener('scrollend', aterrizar)
+    }
+  }, [anclar, aterrizar])
 
   // Zoom: Ctrl + rueda o teclas en la PC, dos dedos en el celular. Mientras los dedos se mueven solo se estira
   // la imagen (fluido); al soltar, el motor vuelve a pintar las páginas nítidas al nuevo tamaño.
@@ -188,26 +211,38 @@ export default function App() {
       else return
       e.preventDefault()
     }
-    let pinza: { d0: number; x: number; y: number; s: number } | null = null
+    let pinza: { d0: number; px: number; py: number; vx: number; vy: number; s: number } | null = null
     const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+    const medio = (t: TouchList) => punto((t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2)
     const inicio = (e: TouchEvent) => {
       if (e.touches.length !== 2) return
-      const t = e.touches
-      const [x, y] = punto((t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2)
-      pinza = { d0: dist(t), x, y, s: 1 }
-      c.style.transformOrigin = `${v.scrollLeft + x}px ${v.scrollTop + y}px`
+      const [vx, vy] = medio(e.touches)
+      pinza = { d0: dist(e.touches), px: v.scrollLeft + vx, py: v.scrollTop + vy, vx, vy, s: 1 }
+      c.style.willChange = 'transform'
     }
     const mover = (e: TouchEvent) => {
       if (!pinza || e.touches.length !== 2) return
-      e.preventDefault()
+      if (e.cancelable) e.preventDefault()
       const z0 = zoomRef.current
+      const [vx, vy] = medio(e.touches)
       pinza.s = limitarZoom((z0 * dist(e.touches)) / pinza.d0) / z0
-      c.style.transform = `scale(${pinza.s})`
+      pinza.vx = vx
+      pinza.vy = vy
+      // El punto de la página que quedó entre los dedos los sigue, aunque el primer dedo ya haya empezado a desplazar.
+      const tx = vx + v.scrollLeft - pinza.px * pinza.s
+      const ty = vy + v.scrollTop - pinza.py * pinza.s
+      c.style.transform = `translate(${tx}px, ${ty}px) scale(${pinza.s})`
     }
     const fin = (e: TouchEvent) => {
       if (!pinza || e.touches.length === 2) return
-      if (!cambiarZoom(zoomRef.current * pinza.s, pinza.x, pinza.y)) c.style.transform = ''
+      const { s, px, py, vx, vy } = pinza
       pinza = null
+      if (cambiarZoom(zoomRef.current * s, vx, vy, px, py)) return
+      // El zoom no cambió, pero los dedos pudieron mover la página.
+      c.style.transform = ''
+      c.style.willChange = ''
+      v.scrollLeft = px - vx
+      v.scrollTop = py - vy
     }
     v.addEventListener('wheel', rueda, { passive: false })
     v.addEventListener('touchstart', inicio, { passive: true })
@@ -259,6 +294,7 @@ export default function App() {
         setCentro(0)
         setVisibles([0, 0])
         setCercanas([0, 0])
+        setRecortes([])
         ajuste.current = null
         visor.current!.scrollTo(0, 0)
       }
@@ -292,6 +328,12 @@ export default function App() {
   }, [])
 
   const ancho = Math.max(100, Math.min(anchoVisor - 2 * MARGEN, 1000)) * zoom
+  // Mientras se sigue cambiando el zoom la imagen anterior solo se estira; la nítida se pide al terminar.
+  const [anchoPedido, setAnchoPedido] = useState(ancho)
+  useEffect(() => {
+    const t = setTimeout(() => setAnchoPedido(ancho), 150)
+    return () => clearTimeout(t)
+  }, [ancho])
 
   return (
     <div className={noche ? 'app noche' : 'app'}>
@@ -365,7 +407,7 @@ export default function App() {
           onScroll={() => {
             medir()
             clearTimeout(relojVecinas.current)
-            if (!reloj.current) reloj.current = window.setTimeout(seguir, 150)
+            if (!reloj.current) reloj.current = window.setTimeout(seguir, 100)
           }}
         >
           <div className="contenido" ref={contenido}>
@@ -374,9 +416,11 @@ export default function App() {
                 key={doc.id}
                 doc={doc}
                 ancho={ancho}
+                anchoPedido={anchoPedido}
                 centro={centro}
                 visibles={visibles}
                 cercanas={cercanas}
+                recortes={recortes}
                 alCargar={alCargar}
               />
             )}
@@ -426,21 +470,26 @@ export default function App() {
 
 /**
  * Todas las páginas reservan su espacio. Cada una muestra, de abajo arriba: su número, su miniatura (una vez pedida
- * se queda, por eso al volver a una hoja ya se ve) y su imagen nítida (solo cerca de la pantalla).
+ * se queda, por eso al volver a una hoja ya se ve), su imagen nítida (solo cerca de la pantalla) y, con mucho zoom,
+ * el recorte con el detalle exacto de lo que se está mirando.
  */
 const Paginas = memo(function Paginas({
   doc,
   ancho,
+  anchoPedido,
   centro,
   visibles,
   cercanas,
+  recortes,
   alCargar,
 }: {
   doc: Doc
   ancho: number
+  anchoPedido: number
   centro: number
   visibles: Rango
   cercanas: Rango
+  recortes: Recorte[]
   alCargar: (ms: number) => void
 }) {
   // Alto/ancho real de las páginas ya pintadas que no miden como la primera.
@@ -455,7 +504,7 @@ const Paginas = memo(function Paginas({
   for (let i = Math.max(0, centro - VENTANA); i <= Math.min(doc.info.paginas - 1, centro + VENTANA); i++) {
     vistas.current.add(i)
   }
-  const w = cubeta(ancho * devicePixelRatio)
+  const w = anchoEntera(anchoPedido * devicePixelRatio)
   const dentro = (r: Rango, n: number) => n >= r[0] && n <= r[1]
   return Array.from({ length: doc.info.paginas }, (_, n) => (
     <Pagina
@@ -466,6 +515,7 @@ const Paginas = memo(function Paginas({
       alto={ancho * (prop[n] ?? base)}
       mini={vistas.current.has(n)}
       nitida={dentro(visibles, n) || dentro(cercanas, n) ? w : 0}
+      recorte={recortes.find((r) => r.n === n)}
       medida={medida}
       alCargar={alCargar}
     />
@@ -479,6 +529,7 @@ const Pagina = memo(function Pagina({
   alto,
   mini,
   nitida,
+  recorte,
   medida,
   alCargar,
 }: {
@@ -488,6 +539,7 @@ const Pagina = memo(function Pagina({
   alto: number
   mini: boolean
   nitida: number
+  recorte?: Recorte
   medida: (n: number, real: number) => void
   alCargar: (ms: number) => void
 }) {
@@ -513,9 +565,40 @@ const Pagina = memo(function Pagina({
           }}
         />
       )}
+      {recorte && <Detalle r={recorte} id={id} alCargar={alCargar} />}
     </div>
   )
 })
+
+/**
+ * El recorte con el detalle exacto. Se posiciona en % de la página: al cambiar el zoom sigue en su sitio, solo estirado.
+ * El anterior se queda visible hasta que llega el nuevo; encima, el nuevo es transparente mientras no ha cargado.
+ */
+function Detalle({ r, id, alCargar }: { r: Recorte; id: number; alCargar: (ms: number) => void }) {
+  const direccion = (c: Recorte) =>
+    `${convertFileSrc(String(c.n), 'pagina')}?w=${c.W}&h=${c.H}&x=${c.x}&y=${c.y}&cw=${c.cw}&ch=${c.ch}&d=${id}`
+  const t0 = useMemo(() => performance.now(), [r])
+  const [listo, setListo] = useState<Recorte | null>(null)
+  return (listo && listo !== r ? [listo, r] : [r]).map((c) => (
+    <img
+      key={direccion(c)}
+      src={direccion(c)}
+      alt=""
+      decoding="sync"
+      draggable={false}
+      style={{
+        left: `${(c.x / c.W) * 100}%`,
+        top: `${(c.y / c.H) * 100}%`,
+        width: `${(c.cw / c.W) * 100}%`,
+        height: `${(c.ch / c.H) * 100}%`,
+      }}
+      onLoad={() => {
+        if (c === r) alCargar(performance.now() - t0)
+        setListo(c)
+      }}
+    />
+  ))
+}
 
 function Imagen({ src, alCargar }: { src: string; alCargar: (ms: number, proporcion: number) => void }) {
   // Al cambiar el zoom cambia src y el mismo <img> sigue mostrando la imagen anterior hasta que llega la nítida.

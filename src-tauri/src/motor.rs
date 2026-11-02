@@ -3,7 +3,7 @@ use std::fs::File;
 use std::sync::mpsc::{self, Sender};
 use std::time::Instant;
 
-use mupdf::{Colorspace, Document, Matrix, Outline};
+use mupdf::{Colorspace, Device, Document, Matrix, Outline, Pixmap};
 use serde::Serialize;
 use tauri::UriSchemeResponder;
 use tauri::http::{Response, Uri, header};
@@ -31,9 +31,21 @@ struct Entrada {
 const MINIATURA: u32 = 384;
 const TOPE_CACHE: usize = 64 * 1024 * 1024;
 
+/// Pedazo de una página, para hacer zoom sin pintar la hoja entera: w y h son el tamaño de la página entera a ese zoom.
+#[derive(Clone, Copy)]
+struct Recorte {
+    w: u32,
+    h: u32,
+    x: u32,
+    y: u32,
+    cw: u32,
+    ch: u32,
+}
+
 struct PedidoPagina {
     n: i32,
     ancho: u32,
+    recorte: Option<Recorte>,
     resp: UriSchemeResponder,
 }
 
@@ -80,22 +92,35 @@ impl Motor {
                         Pedido::Pagina(p) => pendientes.push(p),
                     }
                 }
-                // Primero lo más reciente (lo que se está mirando); las páginas nítidas antes que las miniaturas.
-                let Some(i) = pendientes.iter().rposition(|p| p.ancho != MINIATURA).or(pendientes.len().checked_sub(1))
+                // Primero lo más reciente (lo que se está mirando): recortes, luego hojas enteras, luego miniaturas.
+                let Some(i) = pendientes
+                    .iter()
+                    .rposition(|p| p.recorte.is_some())
+                    .or_else(|| pendientes.iter().rposition(|p| p.ancho != MINIATURA))
+                    .or(pendientes.len().checked_sub(1))
                 else {
                     continue;
                 };
                 let p = pendientes.remove(i);
+                // De una misma página solo sirve el recorte más reciente.
+                if p.recorte.is_some() {
+                    for viejo in pendientes.extract_if(.., |q| q.recorte.is_some() && q.n == p.n) {
+                        viejo.resp.respond(respuesta(Err("Recorte reemplazado".into())));
+                    }
+                }
                 let clave = (p.n, p.ancho);
-                let r = match (cache.leer(clave), &abierto) {
-                    (Some(jpg), _) => Ok(jpg),
-                    (None, Some((doc, _))) => pintar(doc, p.n, p.ancho).inspect(|jpg| {
-                        // Las miniaturas no: la pantalla las conserva.
-                        if p.ancho != MINIATURA {
-                            cache.guardar(clave, jpg.clone());
-                        }
-                    }),
-                    (None, None) => Err("No hay un documento abierto".into()),
+                let r = match (&abierto, p.recorte) {
+                    (None, _) => Err("No hay un documento abierto".into()),
+                    (Some((doc, _)), Some(recorte)) => pintar_recorte(doc, p.n, recorte),
+                    (Some((doc, _)), None) => match cache.leer(clave) {
+                        Some(jpg) => Ok(jpg),
+                        None => pintar(doc, p.n, p.ancho).inspect(|jpg| {
+                            // Las miniaturas no: la pantalla las conserva.
+                            if p.ancho != MINIATURA {
+                                cache.guardar(clave, jpg.clone());
+                            }
+                        }),
+                    },
                 };
                 p.resp.respond(respuesta(r));
             }
@@ -110,15 +135,20 @@ impl Motor {
     }
 
     /// Pedido de la pantalla: pagina://localhost/<n>?w=<ancho en píxeles>
+    /// Para un recorte, además: h=<alto de la página>, x, y, cw, ch (el pedazo, en píxeles).
     pub fn pagina(&self, uri: &Uri, resp: UriSchemeResponder) {
-        let leido = || -> Option<(i32, u32)> {
+        let q = |k: &str| -> Option<u32> {
+            uri.query()?.split('&').find_map(|p| p.strip_prefix(k)?.strip_prefix('='))?.parse().ok()
+        };
+        let leido = || -> Option<(i32, u32, Option<Recorte>)> {
             let n = uri.path().trim_start_matches('/').parse().ok()?;
-            let w = uri.query()?.split('&').find_map(|p| p.strip_prefix("w="))?.parse().ok()?;
-            Some((n, w))
+            let w = q("w")?;
+            let recorte = (|| Some(Recorte { w, h: q("h")?, x: q("x")?, y: q("y")?, cw: q("cw")?, ch: q("ch")? }))();
+            Some((n, w, recorte))
         };
         match leido() {
-            Some((n, ancho)) => {
-                let _ = self.0.send(Pedido::Pagina(PedidoPagina { n, ancho, resp }));
+            Some((n, ancho, recorte)) => {
+                let _ = self.0.send(Pedido::Pagina(PedidoPagina { n, ancho, recorte, resp }));
             }
             None => resp.respond(respuesta(Err("Pedido no válido".into()))),
         }
@@ -162,8 +192,34 @@ fn pintar(doc: &Document, n: i32, ancho: u32) -> Result<Vec<u8>, String> {
     let px = pagina
         .to_pixmap(&Matrix::new_scale(escala, escala), &Colorspace::device_rgb(), false, true)
         .map_err(texto)?;
+    jpeg(&px, if ancho == MINIATURA { 60 } else { 90 })
+}
+
+/// Pinta solo el pedazo pedido: el trabajo y la memoria dependen del tamaño de la pantalla, no del zoom.
+fn pintar_recorte(doc: &Document, n: i32, r: Recorte) -> Result<Vec<u8>, String> {
+    if r.cw == 0 || r.ch == 0 || r.cw > 6000 || r.ch > 6000 {
+        return Err("Recorte no válido.".into());
+    }
+    let pagina = doc.load_page(n).map_err(texto)?;
+    let b = pagina.bounds().map_err(texto)?;
+    // Escala de cada eje por separado: así coincide exacto con la hoja entera que se ve debajo.
+    let (sx, sy) = (r.w as f32 / b.width(), r.h as f32 / b.height());
+    if !(sx.is_finite() && sy.is_finite() && sx > 0.0 && sy > 0.0) {
+        return Err("La página está vacía.".into());
+    }
+    let mut px = Pixmap::new_with_w_h(&Colorspace::device_rgb(), r.cw as i32, r.ch as i32, false).map_err(texto)?;
+    px.clear_with(255).map_err(texto)?;
+    let ctm = Matrix::new(sx, 0.0, 0.0, sy, -b.x0 * sx - r.x as f32, -b.y0 * sy - r.y as f32);
+    let dispositivo = Device::from_pixmap(&px).map_err(texto)?;
+    pagina.run(&dispositivo, &ctm).map_err(texto)?;
+    drop(dispositivo);
+    jpeg(&px, 95)
+}
+
+/// Desde calidad 90 el JPEG no reduce el color: las letras de color quedan limpias.
+fn jpeg(px: &Pixmap, calidad: u8) -> Result<Vec<u8>, String> {
     let mut jpg = Vec::new();
-    jpeg_encoder::Encoder::new(&mut jpg, if ancho == MINIATURA { 60 } else { 85 })
+    jpeg_encoder::Encoder::new(&mut jpg, calidad)
         .encode(px.samples(), px.width() as u16, px.height() as u16, jpeg_encoder::ColorType::Rgb)
         .map_err(texto)?;
     Ok(jpg)
