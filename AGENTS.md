@@ -77,7 +77,7 @@ Un lector de PDF **gratis, sin anuncios, sin rastreo y sin cobros**, para uso de
 - Falta anotar los tiempos exactos con el PDF de 500 MB de David. Él confirmó que se siente rápido, pero no hay números.
 - No se ha probado con un escaneado de 1000 hojas.
 - El letrero de tiempos se quitó en la 0.1.4.
-- Probar en el celular real: reabrir el último PDF después de cerrar la app del todo, y los gestos nuevos (doble toque, deslizar el panel, "Atrás").
+- Probado en el celular el 2026-11-02 (0.1.5): reabrir el último PDF, doble toque, deslizar el panel, "Atrás" y los avisos funcionaron.
 
 ## Pedidos nuevos de David (siguiente etapa)
 
