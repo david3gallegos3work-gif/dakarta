@@ -48,7 +48,7 @@ Un lector de PDF **gratis, sin anuncios, sin rastreo y sin cobros**, para uso de
 
 **Fase 1 terminada y probada por David** (versión 0.1.2, noviembre de 2026). En git, la marca `fin-fase-1-claude` señala el punto exacto donde quedó. No la muevas ni la borres: David la usará para revisar lo que se haga después. Después llegaron buscar texto, últimos archivos y la reapertura del último PDF (0.1.3), y el selector de Android con permiso guardable, los gestos y "Atrás" (0.1.4).
 
-**Lo que ya funciona (Android y Windows):** abrir PDF sin cargarlo entero, pasar páginas, zoom (dos dedos, Ctrl + rueda, botones, doble toque normal/máximo), índice, buscar texto, últimos archivos, reabrir el último, modo noche, "Abrir con Dakarta" / lector predeterminado y aviso de versión nueva.
+**Lo que ya funciona (Android y Windows):** abrir PDF sin cargarlo entero, pasar páginas, zoom (dos dedos, Ctrl + rueda, botones, doble toque normal/mitad), índice, buscar texto, últimos archivos, reabrir el último, modo noche, "Abrir con Dakarta" / lector predeterminado y aviso de versión nueva.
 
 **Motor:** la Opción A (crate `mupdf` en Rust) compila y funciona en Android, así que la Opción B queda descartada.
 

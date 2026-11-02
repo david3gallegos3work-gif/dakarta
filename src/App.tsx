@@ -3,7 +3,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import logo from '../assets/logo.jpg'
 import { guardarReciente, leerRecientes, olvidarReciente, type Reciente } from './recientes.ts'
 import { buscarActualizacion, type Actualizacion } from './version.ts'
-import { ANCHO_ENTERA_MAX, anchoEntera, imanZoom, limitarZoom, MINIATURA, recorte, ZOOM_MAX, type Recorte } from './zoom.ts'
+import { ANCHO_ENTERA_MAX, anchoEntera, imanZoom, limitarZoom, MINIATURA, recorte, type Recorte } from './zoom.ts'
 
 declare global {
   interface Window {
@@ -279,7 +279,7 @@ export default function App() {
         v.scrollTop = py - vy
         return
       }
-      // Dos toques seguidos y quietos en el mismo lugar: normal ↔ máximo.
+      // Dos toques seguidos y quietos en el mismo lugar: normal ↔ mitad (50%).
       if (e.type === 'touchcancel' || e.touches.length !== 0 || !toque) {
         toque = null
         return
@@ -295,7 +295,7 @@ export default function App() {
       const [vx, vy] = punto(x, y)
       if (ahora - ultimoToque < 300 && Math.hypot(x - ultimoPunto.x, y - ultimoPunto.y) < 40) {
         ultimoToque = 0
-        cambiarZoom(zoomRef.current === 1 ? ZOOM_MAX : 1, vx, vy)
+        cambiarZoom(zoomRef.current === 1 ? 0.5 : 1, vx, vy)
       } else {
         ultimoToque = ahora
         ultimoPunto = { x, y }
@@ -617,6 +617,24 @@ export default function App() {
             <button className="abrir-indice" onClick={abrir} disabled={abriendo}>
               {abriendo ? 'Abriendo…' : 'Abrir'}
             </button>
+            {recientes.length > 0 && (
+              <div className="recientes-panel">
+                <h2>Últimos archivos</h2>
+                <ul>
+                  {recientes.slice(0, 4).map((r) => (
+                    <li key={r.ruta}>
+                      <button
+                        onClick={() => cargar(invoke<Info>('abrir_ruta', { ruta: r.ruta }), r)}
+                        disabled={abriendo}
+                        title={r.nombre}
+                      >
+                        {r.nombre}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {doc.info.indice.length ? (
               <Indice
                 entradas={doc.info.indice}
