@@ -1,6 +1,9 @@
 # Cambios al proyecto Android que genera Tauri (se aplican en GitHub Actions después de "tauri android init").
 # Abrir con Dakarta: un PDF tocado en WhatsApp, Descargas, un correo… abre la app, y la pantalla lo recoge con
 # DakartaAndroid.pendiente(). También permite elegir Dakarta como lector predeterminado ("Siempre").
+# El botón "Abrir" usa el selector de Android (no el de Tauri): su permiso sí se puede guardar para reabrir el
+# archivo otro día. El selector de Tauri pide el archivo con ACTION_GET_CONTENT, que solo da permiso temporal.
+# "Atrás" (botón o gesto) cierra el panel o la búsqueda antes de salir de la app.
 import glob, sys
 
 act = glob.glob('src-tauri/gen/android/app/src/main/java/**/MainActivity.kt', recursive=True)[0]
@@ -8,9 +11,30 @@ s = open(act).read()
 LLAMADA = 'super.onCreate(savedInstanceState)\n'
 if LLAMADA not in s:
     sys.exit('MainActivity: no se encontró onCreate')
-s = s.replace(LLAMADA, LLAMADA + '    recibir(intent)\n', 1)
+ATRAS = '''    onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+      override fun handleOnBackPressed() {
+        val w = vista
+        if (w == null) {
+          isEnabled = false
+          onBackPressedDispatcher.onBackPressed()
+          isEnabled = true
+          return
+        }
+        // La pantalla dice si cerró algo (el índice o la búsqueda) o si toca salir de la app.
+        w.evaluateJavascript("window.DakartaAtras ? window.DakartaAtras() : false") { r ->
+          if (r != "true") {
+            isEnabled = false
+            onBackPressedDispatcher.onBackPressed()
+            isEnabled = true
+          }
+        }
+      }
+    })
+'''
+s = s.replace(LLAMADA, LLAMADA + '    recibir(intent)\n' + ATRAS, 1)
 METODOS = r'''
   private val puente = PuenteDakarta(this)
+  private var vista: android.webkit.WebView? = null
 
   override fun onNewIntent(intent: android.content.Intent) {
     super.onNewIntent(intent)
@@ -31,8 +55,21 @@ METODOS = r'''
     }
   }
 
+  override fun onActivityResult(pedido: Int, resultado: Int, datos: android.content.Intent?) {
+    super.onActivityResult(pedido, resultado, datos)
+    if (pedido != PEDIDO_PDF || resultado != android.app.Activity.RESULT_OK) return
+    val uri = datos?.data ?: return
+    try {
+      contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    } catch (_: Exception) { }
+    puente.uri = uri.toString()
+    // La pantalla ya escucha "focus"; así recoge el archivo aunque Android no lo avise solo.
+    vista?.evaluateJavascript("window.dispatchEvent(new Event('focus'))", null)
+  }
+
   override fun onWebViewCreate(webView: android.webkit.WebView) {
     super.onWebViewCreate(webView)
+    vista = webView
     webView.addJavascriptInterface(puente, "DakartaAndroid")
   }
 }
@@ -65,7 +102,25 @@ class PuenteDakarta(private val actividad: android.app.Activity) {
       )
     } catch (_: Exception) { }
   }
+
+  /** Selector del sistema con permiso guardable; el archivo vuelve por onActivityResult. */
+  @android.webkit.JavascriptInterface
+  fun elegir() {
+    actividad.runOnUiThread {
+      val i = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
+        addCategory(android.content.Intent.CATEGORY_OPENABLE)
+        type = "application/pdf"
+        addFlags(
+          android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+            android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+        )
+      }
+      actividad.startActivityForResult(i, PEDIDO_PDF)
+    }
+  }
 }
+
+private const val PEDIDO_PDF = 0x0DA1
 '''
 fin = s.rstrip().rfind('}')
 s = s[:fin].rstrip() + '\n' + METODOS

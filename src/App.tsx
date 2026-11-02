@@ -1,18 +1,21 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import logo from '../assets/logo.jpg'
-import { guardarReciente, leerRecientes, type Reciente } from './recientes.ts'
+import { guardarReciente, leerRecientes, olvidarReciente, type Reciente } from './recientes.ts'
 import { buscarActualizacion, type Actualizacion } from './version.ts'
-import { ANCHO_ENTERA_MAX, anchoEntera, imanZoom, limitarZoom, MINIATURA, recorte, type Recorte } from './zoom.ts'
+import { ANCHO_ENTERA_MAX, anchoEntera, imanZoom, limitarZoom, MINIATURA, recorte, ZOOM_MAX, type Recorte } from './zoom.ts'
 
 declare global {
   interface Window {
-    /** Solo en Android (scripts/parchar-android.py): el PDF que llegó por "Abrir con" y su nombre. */
+    /** Solo en Android (scripts/parchar-android.py): el PDF que llegó por "Abrir con", su nombre y el selector. */
     DakartaAndroid?: {
       pendiente(): string | null
       nombre(uri: string): string | null
       persistir(uri: string): void
+      elegir?(): void
     }
+    /** Android: el botón o gesto "atrás" pregunta si la pantalla lo usó o si toca salir. */
+    DakartaAtras?: () => boolean
   }
 }
 
@@ -74,7 +77,6 @@ export default function App() {
   const [cercanas, setCercanas] = useState<Rango>([0, 0])
   const [recortes, setRecortes] = useState<Recorte[]>([])
   const [anchoVisor, setAnchoVisor] = useState(0)
-  const [msPagina, setMsPagina] = useState<number | null>(null)
   const [nueva, setNueva] = useState<Actualizacion | null>(null)
   const [recientes, setRecientes] = useState<Reciente[]>(leerRecientes)
   const [verBuscar, setVerBuscar] = useState(false)
@@ -84,6 +86,7 @@ export default function App() {
   const [coincidencia, setCoincidencia] = useState(-1)
   const visor = useRef<HTMLDivElement>(null)
   const contenido = useRef<HTMLDivElement>(null)
+  const arrastre = useRef<{ x: number; y: number } | null>(null)
   const zoomRef = useRef(zoom)
   const ajuste = useRef<Ancla | null>(null)
   const reloj = useRef(0)
@@ -235,10 +238,17 @@ export default function App() {
       e.preventDefault()
     }
     let pinza: { d0: number; px: number; py: number; vx: number; vy: number; s: number } | null = null
+    let toque: { x: number; y: number; t: number } | null = null
+    let ultimoToque = 0
+    let ultimoPunto = { x: 0, y: 0 }
     const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
     const medio = (t: TouchList) => punto((t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2)
     const inicio = (e: TouchEvent) => {
-      if (e.touches.length !== 2) return
+      if (e.touches.length !== 2) {
+        toque = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY, t: performance.now() } : null
+        return
+      }
+      toque = null
       const [vx, vy] = medio(e.touches)
       pinza = { d0: dist(e.touches), px: v.scrollLeft + vx, py: v.scrollTop + vy, vx, vy, s: 1 }
       c.style.willChange = 'transform'
@@ -257,15 +267,39 @@ export default function App() {
       c.style.transform = `translate(${tx}px, ${ty}px) scale(${pinza.s})`
     }
     const fin = (e: TouchEvent) => {
-      if (!pinza || e.touches.length === 2) return
-      const { s, px, py, vx, vy } = pinza
-      pinza = null
-      if (cambiarZoom(zoomRef.current * s, vx, vy, px, py)) return
-      // El zoom no cambió, pero los dedos pudieron mover la página.
-      c.style.transform = ''
-      c.style.willChange = ''
-      v.scrollLeft = px - vx
-      v.scrollTop = py - vy
+      if (pinza) {
+        if (e.touches.length === 2) return
+        const { s, px, py, vx, vy } = pinza
+        pinza = null
+        if (cambiarZoom(zoomRef.current * s, vx, vy, px, py)) return
+        // El zoom no cambió, pero los dedos pudieron mover la página.
+        c.style.transform = ''
+        c.style.willChange = ''
+        v.scrollLeft = px - vx
+        v.scrollTop = py - vy
+        return
+      }
+      // Dos toques seguidos y quietos en el mismo lugar: normal ↔ máximo.
+      if (e.type === 'touchcancel' || e.touches.length !== 0 || !toque) {
+        toque = null
+        return
+      }
+      const { clientX: x, clientY: y } = e.changedTouches[0]
+      const ahora = performance.now()
+      const quieto = Math.hypot(x - toque.x, y - toque.y) < 12 && ahora - toque.t < 300
+      toque = null
+      if (!quieto) {
+        ultimoToque = 0
+        return
+      }
+      const [vx, vy] = punto(x, y)
+      if (ahora - ultimoToque < 300 && Math.hypot(x - ultimoPunto.x, y - ultimoPunto.y) < 40) {
+        ultimoToque = 0
+        cambiarZoom(zoomRef.current === 1 ? ZOOM_MAX : 1, vx, vy)
+      } else {
+        ultimoToque = ahora
+        ultimoPunto = { x, y }
+      }
     }
     v.addEventListener('wheel', rueda, { passive: false })
     v.addEventListener('touchstart', inicio, { passive: true })
@@ -356,9 +390,7 @@ export default function App() {
     [busqueda, coincidencia, irA],
   )
 
-  const alCargar = useCallback((ms: number) => setMsPagina(Math.round(ms)), [])
-
-  async function cargar(pedido: Promise<Info | null>) {
+  async function cargar(pedido: Promise<Info | null>, reciente?: Reciente) {
     setAbriendo(true)
     setError('')
     try {
@@ -367,7 +399,6 @@ export default function App() {
         setDoc((d) => ({ info, id: (d?.id ?? 0) + 1 }))
         setZoom(1)
         setVerIndice(false)
-        setMsPagina(null)
         setCentro(0)
         setVisibles([0, 0])
         setCercanas([0, 0])
@@ -392,21 +423,49 @@ export default function App() {
         setRecientes((lista) => guardarReciente(lista, { ruta: info.ruta, nombre }))
       }
     } catch (e) {
-      setError(String(e))
+      console.error(e)
+      setError(reciente ? `No se pudo abrir «${reciente.nombre}». Ábrelo otra vez con «Abrir».` : 'No se pudo abrir el archivo. Inténtalo otra vez con «Abrir».')
+      if (reciente) setRecientes((lista) => olvidarReciente(lista, reciente.ruta))
     } finally {
       setAbriendo(false)
     }
   }
 
-  const abrir = () => cargar(invoke<Info | null>('elegir_pdf'))
+  // En Android el selector lo abre la propia app: así el permiso queda guardado y el archivo se puede reabrir otro día.
+  const abrir = () => {
+    const puente = window.DakartaAndroid
+    if (puente?.elegir) {
+      puente.elegir()
+      return
+    }
+    cargar(invoke<Info | null>('elegir_pdf'))
+  }
+
+  // El botón o gesto "atrás" de Android cierra primero el panel o la búsqueda; si no hay nada abierto, sale.
+  useEffect(() => {
+    window.DakartaAtras = () => {
+      if (verIndice) {
+        setVerIndice(false)
+        return true
+      }
+      if (verBuscar) {
+        cerrarBuscar()
+        return true
+      }
+      return false
+    }
+    return () => {
+      delete window.DakartaAtras
+    }
+  }, [verIndice, verBuscar, cerrarBuscar])
 
   // "Abrir con Dakarta": Windows lo entrega al arrancar; Android también con la app ya abierta, al volver a ella.
   // Si nadie mandó un archivo, se reabre el último que se usó.
   useEffect(() => {
     let llegoArchivo = false
-    const abrirRuta = (ruta: string) => {
+    const abrirRuta = (ruta: string, reciente?: Reciente) => {
       llegoArchivo = true
-      cargar(invoke<Info>('abrir_ruta', { ruta }))
+      cargar(invoke<Info>('abrir_ruta', { ruta }), reciente)
     }
     const pendiente = () => {
       const ruta = window.DakartaAndroid?.pendiente()
@@ -417,7 +476,7 @@ export default function App() {
       if (ruta) abrirRuta(ruta)
       else if (!llegoArchivo) {
         const [ultimo] = leerRecientes()
-        if (ultimo) abrirRuta(ultimo.ruta)
+        if (ultimo) abrirRuta(ultimo.ruta, ultimo)
       }
     })
     document.addEventListener('visibilitychange', pendiente)
@@ -440,9 +499,6 @@ export default function App() {
   return (
     <div className={noche ? 'app noche' : 'app'}>
       <header className="barra">
-        <button onClick={abrir} disabled={abriendo}>
-          {abriendo ? 'Abriendo…' : 'Abrir'}
-        </button>
         {doc && (
           <>
             <button onClick={() => setVerIndice((x) => !x)} aria-pressed={verIndice} aria-label="Índice" title="Índice">
@@ -543,7 +599,24 @@ export default function App() {
 
       <div className="cuerpo">
         {doc && verIndice && (
-          <nav className="indice" aria-label="Índice">
+          <nav
+            className="indice"
+            aria-label="Índice"
+            onTouchStart={(e) => {
+              arrastre.current = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null
+            }}
+            onTouchEnd={(e) => {
+              const a = arrastre.current
+              arrastre.current = null
+              if (!a) return
+              const t = e.changedTouches[0]
+              // Deslizar el dedo hacia la izquierda cierra el panel, como retroceder.
+              if (a.x - t.clientX > 60 && Math.abs(t.clientY - a.y) < 50) setVerIndice(false)
+            }}
+          >
+            <button className="abrir-indice" onClick={abrir} disabled={abriendo}>
+              {abriendo ? 'Abriendo…' : 'Abrir'}
+            </button>
             {doc.info.indice.length ? (
               <Indice
                 entradas={doc.info.indice}
@@ -579,7 +652,6 @@ export default function App() {
                 recortes={recortes}
                 busqueda={busqueda}
                 coincidencia={coincidencia}
-                alCargar={alCargar}
               />
             )}
           </div>
@@ -598,7 +670,7 @@ export default function App() {
                   {recientes.map((r) => (
                     <li key={r.ruta}>
                       <button
-                        onClick={() => cargar(invoke<Info>('abrir_ruta', { ruta: r.ruta }))}
+                        onClick={() => cargar(invoke<Info>('abrir_ruta', { ruta: r.ruta }), r)}
                         disabled={abriendo}
                         title={r.nombre}
                       >
@@ -618,11 +690,6 @@ export default function App() {
           <button className="aviso-error" onClick={() => setError('')}>
             {error} (tocar para cerrar)
           </button>
-        )}
-        {doc && (
-          <div className="tiempos">
-            Abrió en {doc.info.ms} ms{msPagina !== null && ` · Página en ${msPagina} ms`}
-          </div>
         )}
         {nueva && (
           <div className="aviso-version" role="status">
@@ -659,7 +726,6 @@ const Paginas = memo(function Paginas({
   recortes,
   busqueda,
   coincidencia,
-  alCargar,
 }: {
   doc: Doc
   ancho: number
@@ -670,7 +736,6 @@ const Paginas = memo(function Paginas({
   recortes: Recorte[]
   busqueda: Busqueda | null
   coincidencia: number
-  alCargar: (ms: number) => void
 }) {
   // Alto/ancho real de las páginas ya pintadas que no miden como la primera.
   const [prop, setProp] = useState<Record<number, number>>({})
@@ -711,7 +776,6 @@ const Paginas = memo(function Paginas({
         resaltados={resaltados}
         actual={resaltados?.some((x) => x.i === coincidencia) ? coincidencia : -1}
         medida={medida}
-        alCargar={alCargar}
       />
     )
   })
@@ -728,7 +792,6 @@ const Pagina = memo(function Pagina({
   resaltados,
   actual,
   medida,
-  alCargar,
 }: {
   n: number
   id: number
@@ -740,7 +803,6 @@ const Pagina = memo(function Pagina({
   resaltados?: { c: Coincidencia; i: number }[]
   actual: number
   medida: (n: number, real: number) => void
-  alCargar: (ms: number) => void
 }) {
   const url = (w: number) => `${convertFileSrc(String(n), 'pagina')}?w=${w}&d=${id}`
   return (
@@ -755,16 +817,8 @@ const Pagina = memo(function Pagina({
           onLoad={(e) => medida(n, e.currentTarget.naturalHeight / e.currentTarget.naturalWidth)}
         />
       )}
-      {nitida > 0 && (
-        <Imagen
-          src={url(nitida)}
-          alCargar={(ms, real) => {
-            alCargar(ms)
-            medida(n, real)
-          }}
-        />
-      )}
-      {recorte && <Detalle r={recorte} id={id} alCargar={alCargar} />}
+      {nitida > 0 && <Imagen src={url(nitida)} alCargar={(real) => medida(n, real)} />}
+      {recorte && <Detalle r={recorte} id={id} />}
       {resaltados?.map(({ c, i }) => (
         <span
           key={i}
@@ -785,10 +839,9 @@ const Pagina = memo(function Pagina({
  * El recorte con el detalle exacto. Se posiciona en % de la página: al cambiar el zoom sigue en su sitio, solo estirado.
  * El anterior se queda visible hasta que llega el nuevo; encima, el nuevo es transparente mientras no ha cargado.
  */
-function Detalle({ r, id, alCargar }: { r: Recorte; id: number; alCargar: (ms: number) => void }) {
+function Detalle({ r, id }: { r: Recorte; id: number }) {
   const direccion = (c: Recorte) =>
     `${convertFileSrc(String(c.n), 'pagina')}?w=${c.W}&h=${c.H}&x=${c.x}&y=${c.y}&cw=${c.cw}&ch=${c.ch}&d=${id}`
-  const t0 = useMemo(() => performance.now(), [r])
   const [listo, setListo] = useState<Recorte | null>(null)
   return (listo && listo !== r ? [listo, r] : [r]).map((c) => (
     <img
@@ -803,17 +856,13 @@ function Detalle({ r, id, alCargar }: { r: Recorte; id: number; alCargar: (ms: n
         width: `${(c.cw / c.W) * 100}%`,
         height: `${(c.ch / c.H) * 100}%`,
       }}
-      onLoad={() => {
-        if (c === r) alCargar(performance.now() - t0)
-        setListo(c)
-      }}
+      onLoad={() => setListo(c)}
     />
   ))
 }
 
-function Imagen({ src, alCargar }: { src: string; alCargar: (ms: number, proporcion: number) => void }) {
+function Imagen({ src, alCargar }: { src: string; alCargar: (proporcion: number) => void }) {
   // Al cambiar el zoom cambia src y el mismo <img> sigue mostrando la imagen anterior hasta que llega la nítida.
-  const t0 = useMemo(() => performance.now(), [src])
   const [fallo, setFallo] = useState('')
   if (fallo === src) return <span className="fallo">No se pudo mostrar esta página</span>
   return (
@@ -822,7 +871,7 @@ function Imagen({ src, alCargar }: { src: string; alCargar: (ms: number, proporc
       alt=""
       decoding="async"
       draggable={false}
-      onLoad={(e) => alCargar(performance.now() - t0, e.currentTarget.naturalHeight / e.currentTarget.naturalWidth)}
+      onLoad={(e) => alCargar(e.currentTarget.naturalHeight / e.currentTarget.naturalWidth)}
       onError={() => setFallo(src)}
     />
   )
