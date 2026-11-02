@@ -127,7 +127,7 @@ impl Motor {
 
 fn abrir_doc(ruta: &str) -> Result<(Document, Info), String> {
     let t = Instant::now();
-    let doc = Document::open(ruta).map_err(texto)?;
+    let doc = Document::open(ruta).map_err(|e| format!("No se pudo abrir este archivo: {e}"))?;
     if doc.needs_password().map_err(texto)? {
         return Err("Este PDF tiene contraseña. Abrir PDFs con contraseña llegará en una próxima versión.".into());
     }

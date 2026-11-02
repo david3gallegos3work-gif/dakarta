@@ -1,7 +1,15 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import logo from '../assets/logo.jpg'
+import { buscarActualizacion, type Actualizacion } from './version.ts'
 import { cubeta, limitarZoom, MINIATURA } from './zoom.ts'
+
+declare global {
+  interface Window {
+    /** Solo en Android (scripts/parchar-android.py): el PDF que llegó por "Abrir con". */
+    DakartaAndroid?: { pendiente(): string | null }
+  }
+}
 
 type Entrada = { titulo: string; pagina: number | null; hijos: Entrada[] }
 type Info = { paginas: number; ancho: number; alto: number; indice: Entrada[]; ms: number }
@@ -50,6 +58,7 @@ export default function App() {
   const [cercanas, setCercanas] = useState<Rango>([0, 0])
   const [anchoVisor, setAnchoVisor] = useState(0)
   const [msPagina, setMsPagina] = useState<number | null>(null)
+  const [nueva, setNueva] = useState<Actualizacion | null>(null)
   const visor = useRef<HTMLDivElement>(null)
   const contenido = useRef<HTMLDivElement>(null)
   const zoomRef = useRef(zoom)
@@ -237,11 +246,11 @@ export default function App() {
 
   const alCargar = useCallback((ms: number) => setMsPagina(Math.round(ms)), [])
 
-  async function abrir() {
+  async function cargar(pedido: Promise<Info | null>) {
     setAbriendo(true)
     setError('')
     try {
-      const info = await invoke<Info | null>('elegir_pdf')
+      const info = await pedido
       if (info) {
         setDoc((d) => ({ info, id: (d?.id ?? 0) + 1 }))
         setZoom(1)
@@ -259,6 +268,28 @@ export default function App() {
       setAbriendo(false)
     }
   }
+
+  const abrir = () => cargar(invoke<Info | null>('elegir_pdf'))
+
+  // "Abrir con Dakarta": Windows lo entrega al arrancar; Android también con la app ya abierta, al volver a ella.
+  useEffect(() => {
+    const abrirRuta = (ruta: string) => cargar(invoke<Info>('abrir_ruta', { ruta }))
+    const pendiente = () => {
+      const ruta = window.DakartaAndroid?.pendiente()
+      if (ruta) abrirRuta(ruta)
+    }
+    invoke<string | null>('archivo_inicial').then((ruta) => {
+      if (ruta) abrirRuta(ruta)
+    })
+    pendiente()
+    document.addEventListener('visibilitychange', pendiente)
+    window.addEventListener('focus', pendiente)
+    buscarActualizacion().then(setNueva)
+    return () => {
+      document.removeEventListener('visibilitychange', pendiente)
+      window.removeEventListener('focus', pendiente)
+    }
+  }, [])
 
   const ancho = Math.max(100, Math.min(anchoVisor - 2 * MARGEN, 1000)) * zoom
 
@@ -371,6 +402,21 @@ export default function App() {
         {doc && (
           <div className="tiempos">
             Abrió en {doc.info.ms} ms{msPagina !== null && ` · Página en ${msPagina} ms`}
+          </div>
+        )}
+        {nueva && (
+          <div className="aviso-version" role="status">
+            <span>Hay una versión nueva de Dakarta ({nueva.version}).</span>
+            <button
+              onClick={() => {
+                invoke('descargar_version', { url: nueva.url }).catch((e) => setError(String(e)))
+              }}
+            >
+              Descargar
+            </button>
+            <button onClick={() => setNueva(null)} aria-label="Cerrar aviso">
+              ×
+            </button>
           </div>
         )}
       </div>
