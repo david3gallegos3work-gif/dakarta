@@ -8,6 +8,8 @@ use serde::Serialize;
 use tauri::UriSchemeResponder;
 use tauri::http::{Response, Uri, header};
 
+use crate::cache::Cache;
+
 #[derive(Serialize)]
 pub struct Info {
     paginas: i32,
@@ -25,12 +27,22 @@ struct Entrada {
     hijos: Vec<Entrada>,
 }
 
-enum Pedido {
-    Abrir { ruta: String, archivo: Option<File>, resp: Sender<Result<Info, String>> },
-    Pagina { n: i32, ancho: u32, resp: UriSchemeResponder },
+/// Ancho de las miniaturas que se ven mientras se desplaza (el mismo valor en src/zoom.ts).
+const MINIATURA: u32 = 384;
+const TOPE_CACHE: usize = 64 * 1024 * 1024;
+
+struct PedidoPagina {
+    n: i32,
+    ancho: u32,
+    resp: UriSchemeResponder,
 }
 
-/// MuPDF no se comparte entre hilos: un solo hilo guarda el documento y atiende los pedidos en orden.
+enum Pedido {
+    Abrir { ruta: String, archivo: Option<File>, resp: Sender<Result<Info, String>> },
+    Pagina(PedidoPagina),
+}
+
+/// MuPDF no se comparte entre hilos: un solo hilo guarda el documento y atiende los pedidos.
 pub struct Motor(Sender<Pedido>);
 
 impl Motor {
@@ -39,23 +51,53 @@ impl Motor {
         std::thread::spawn(move || {
             // En Android el archivo viaja con el documento: si se cerrara, MuPDF perdería el acceso.
             let mut abierto: Option<(Document, Option<File>)> = None;
-            for pedido in rx {
-                match pedido {
-                    Pedido::Abrir { ruta, archivo, resp } => {
-                        let r = abrir_doc(&ruta).map(|(doc, info)| {
-                            abierto = Some((doc, archivo));
-                            info
-                        });
-                        let _ = resp.send(r);
+            let mut pendientes: Vec<PedidoPagina> = Vec::new();
+            let mut cache = Cache::nuevo(TOPE_CACHE);
+            loop {
+                // Sin trabajo se espera; con trabajo solo se recoge lo que ya llegó.
+                let primero = if pendientes.is_empty() {
+                    match rx.recv() {
+                        Ok(p) => Some(p),
+                        Err(_) => return,
                     }
-                    Pedido::Pagina { n, ancho, resp } => {
-                        let r = match &abierto {
-                            Some((doc, _)) => pintar(doc, n, ancho),
-                            None => Err("No hay un documento abierto".into()),
-                        };
-                        resp.respond(respuesta(r));
+                } else {
+                    None
+                };
+                for pedido in primero.into_iter().chain(rx.try_iter()) {
+                    match pedido {
+                        Pedido::Abrir { ruta, archivo, resp } => {
+                            let r = abrir_doc(&ruta).map(|(doc, info)| {
+                                abierto = Some((doc, archivo));
+                                cache.vaciar();
+                                // Lo que faltaba del documento anterior ya nadie lo está esperando.
+                                for p in pendientes.drain(..) {
+                                    p.resp.respond(respuesta(Err("Documento cerrado".into())));
+                                }
+                                info
+                            });
+                            let _ = resp.send(r);
+                        }
+                        Pedido::Pagina(p) => pendientes.push(p),
                     }
                 }
+                // Primero lo más reciente (lo que se está mirando); las páginas nítidas antes que las miniaturas.
+                let Some(i) = pendientes.iter().rposition(|p| p.ancho != MINIATURA).or(pendientes.len().checked_sub(1))
+                else {
+                    continue;
+                };
+                let p = pendientes.remove(i);
+                let clave = (p.n, p.ancho);
+                let r = match (cache.leer(clave), &abierto) {
+                    (Some(jpg), _) => Ok(jpg),
+                    (None, Some((doc, _))) => pintar(doc, p.n, p.ancho).inspect(|jpg| {
+                        // Las miniaturas no: la pantalla las conserva.
+                        if p.ancho != MINIATURA {
+                            cache.guardar(clave, jpg.clone());
+                        }
+                    }),
+                    (None, None) => Err("No hay un documento abierto".into()),
+                };
+                p.resp.respond(respuesta(r));
             }
         });
         Motor(tx)
@@ -76,7 +118,7 @@ impl Motor {
         };
         match leido() {
             Some((n, ancho)) => {
-                let _ = self.0.send(Pedido::Pagina { n, ancho, resp });
+                let _ = self.0.send(Pedido::Pagina(PedidoPagina { n, ancho, resp }));
             }
             None => resp.respond(respuesta(Err("Pedido no válido".into()))),
         }
@@ -121,7 +163,7 @@ fn pintar(doc: &Document, n: i32, ancho: u32) -> Result<Vec<u8>, String> {
         .to_pixmap(&Matrix::new_scale(escala, escala), &Colorspace::device_rgb(), false, true)
         .map_err(texto)?;
     let mut jpg = Vec::new();
-    jpeg_encoder::Encoder::new(&mut jpg, 85)
+    jpeg_encoder::Encoder::new(&mut jpg, if ancho == MINIATURA { 60 } else { 85 })
         .encode(px.samples(), px.width() as u16, px.height() as u16, jpeg_encoder::ColorType::Rgb)
         .map_err(texto)?;
     Ok(jpg)

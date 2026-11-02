@@ -1,15 +1,21 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import logo from '../assets/logo.jpg'
-import { cubeta, limitarZoom } from './zoom.ts'
+import { cubeta, limitarZoom, MINIATURA } from './zoom.ts'
 
 type Entrada = { titulo: string; pagina: number | null; hijos: Entrada[] }
 type Info = { paginas: number; ancho: number; alto: number; indice: Entrada[]; ms: number }
 type Doc = { info: Info; id: number }
 /** Punto de una página que debe quedar en el mismo lugar de la pantalla tras un zoom o un giro. */
 type Ancla = { i: number; fx: number; fy: number; vx: number; vy: number }
+type Rango = [number, number]
 
 const MARGEN = 8
+/** Páginas a cada lado de la actual cuya miniatura ya se pide. */
+const VENTANA = 15
+
+const fijar = (poner: (f: (r: Rango) => Rango) => void, a: number, b: number) =>
+  poner((r) => (r[0] === a && r[1] === b ? r : [a, b]))
 
 const leerNoche = () => {
   try {
@@ -39,7 +45,9 @@ export default function App() {
   const [noche, setNoche] = useState(leerNoche)
   const [verIndice, setVerIndice] = useState(false)
   const [actual, setActual] = useState(0)
-  const [rango, setRango] = useState<[number, number]>([0, 2])
+  const [centro, setCentro] = useState(0)
+  const [visibles, setVisibles] = useState<Rango>([0, 0])
+  const [cercanas, setCercanas] = useState<Rango>([0, 0])
   const [anchoVisor, setAnchoVisor] = useState(0)
   const [msPagina, setMsPagina] = useState<number | null>(null)
   const visor = useRef<HTMLDivElement>(null)
@@ -47,27 +55,55 @@ export default function App() {
   const zoomRef = useRef(zoom)
   const ajuste = useRef<Ancla | null>(null)
   const reloj = useRef(0)
+  const relojVecinas = useRef(0)
+  const ultimoY = useRef(0)
   zoomRef.current = zoom
 
   const hijos = () => contenido.current!.children as HTMLCollectionOf<HTMLElement>
 
-  // La página actual se calcula al instante; las páginas a pintar, cuando el desplazamiento se detiene
-  // (así no se piden al motor las que pasan volando).
-  const medir = useCallback((rangoYa = false) => {
+  // La página actual se calcula al instante; el centro de las miniaturas cambia cada pocas páginas.
+  const medir = useCallback(() => {
+    const v = visor.current!
+    const h = hijos()
+    if (!h.length) return
+    const a = buscarPagina(h, v.scrollTop + v.clientHeight / 2)
+    setActual(a)
+    setCentro((c) => (Math.abs(c - a) >= 5 ? a : c))
+  }, [])
+
+  // Al detenerse: primero lo que está a la vista, para que se vea nítido cuanto antes, y un momento después las vecinas.
+  const aterrizar = useCallback(() => {
     const v = visor.current!
     const h = hijos()
     if (!h.length) return
     const { scrollTop: y, clientHeight: alto } = v
-    setActual(buscarPagina(h, y + alto / 2))
-    const fijar = () =>
-      setRango((r) => {
-        const n: [number, number] = [buscarPagina(h, y - alto), buscarPagina(h, y + 2 * alto)]
-        return r[0] === n[0] && r[1] === n[1] ? r : n
-      })
-    clearTimeout(reloj.current)
-    if (rangoYa) fijar()
-    else reloj.current = window.setTimeout(fijar, 120)
+    fijar(setVisibles, buscarPagina(h, y), buscarPagina(h, y + alto))
+    clearTimeout(relojVecinas.current)
+    relojVecinas.current = window.setTimeout(
+      () => fijar(setCercanas, buscarPagina(h, y - alto), buscarPagina(h, y + 2 * alto)),
+      250,
+    )
   }, [])
+
+  // Mientras se desplaza: despacio, se pide nítido lo que está a la vista; muy rápido, solo miniaturas
+  // (así no se piden al motor páginas nítidas de las que pasan volando).
+  const seguir = useCallback(
+    function seguir() {
+      const v = visor.current!
+      const h = hijos()
+      const y = v.scrollTop
+      const movido = Math.abs(y - ultimoY.current)
+      ultimoY.current = y
+      if (movido === 0) {
+        reloj.current = 0
+        aterrizar()
+        return
+      }
+      if (h.length && movido < v.clientHeight) fijar(setVisibles, buscarPagina(h, y), buscarPagina(h, y + v.clientHeight))
+      reloj.current = window.setTimeout(seguir, 150)
+    },
+    [aterrizar],
+  )
 
   const anclar = useCallback((vx: number, vy: number) => {
     const v = visor.current!
@@ -107,8 +143,9 @@ export default function App() {
       v.scrollTop = el.offsetTop + a.fy * el.offsetHeight - a.vy
     }
     ajuste.current = null
-    medir(true)
-  }, [zoom, anchoVisor, doc, medir])
+    medir()
+    aterrizar()
+  }, [zoom, anchoVisor, doc, medir, aterrizar])
 
   useEffect(() => {
     const v = visor.current!
@@ -187,10 +224,16 @@ export default function App() {
     }
   }, [noche])
 
-  const ir = useCallback((n: number) => {
-    const el = hijos()[n]
-    if (el) visor.current!.scrollTop = el.offsetTop - MARGEN
-  }, [])
+  const ir = useCallback(
+    (n: number) => {
+      const el = hijos()[n]
+      if (!el) return
+      visor.current!.scrollTop = el.offsetTop - MARGEN
+      ultimoY.current = visor.current!.scrollTop
+      aterrizar()
+    },
+    [aterrizar],
+  )
 
   const alCargar = useCallback((ms: number) => setMsPagina(Math.round(ms)), [])
 
@@ -204,6 +247,9 @@ export default function App() {
         setZoom(1)
         setVerIndice(false)
         setMsPagina(null)
+        setCentro(0)
+        setVisibles([0, 0])
+        setCercanas([0, 0])
         ajuste.current = null
         visor.current!.scrollTo(0, 0)
       }
@@ -282,9 +328,27 @@ export default function App() {
             )}
           </nav>
         )}
-        <div className="visor" ref={visor} onScroll={() => medir()}>
+        <div
+          className="visor"
+          ref={visor}
+          onScroll={() => {
+            medir()
+            clearTimeout(relojVecinas.current)
+            if (!reloj.current) reloj.current = window.setTimeout(seguir, 150)
+          }}
+        >
           <div className="contenido" ref={contenido}>
-            {doc && <Paginas key={doc.id} doc={doc} ancho={ancho} rango={rango} alCargar={alCargar} />}
+            {doc && (
+              <Paginas
+                key={doc.id}
+                doc={doc}
+                ancho={ancho}
+                centro={centro}
+                visibles={visibles}
+                cercanas={cercanas}
+                alCargar={alCargar}
+              />
+            )}
           </div>
         </div>
         {!doc && (
@@ -314,51 +378,109 @@ export default function App() {
   )
 }
 
-/** Todas las páginas reservan su espacio, pero solo se piden al motor las cercanas a la pantalla. */
+/**
+ * Todas las páginas reservan su espacio. Cada una muestra, de abajo arriba: su número, su miniatura (una vez pedida
+ * se queda, por eso al volver a una hoja ya se ve) y su imagen nítida (solo cerca de la pantalla).
+ */
 const Paginas = memo(function Paginas({
   doc,
   ancho,
-  rango,
+  centro,
+  visibles,
+  cercanas,
   alCargar,
 }: {
   doc: Doc
   ancho: number
-  rango: [number, number]
+  centro: number
+  visibles: Rango
+  cercanas: Rango
   alCargar: (ms: number) => void
 }) {
   // Alto/ancho real de las páginas ya pintadas que no miden como la primera.
   const [prop, setProp] = useState<Record<number, number>>({})
+  const vistas = useRef(new Set<number>())
   const base = doc.info.alto / doc.info.ancho
+  const medida = useCallback(
+    (n: number, real: number) =>
+      setProp((x) => (Math.abs(real - (x[n] ?? base)) > 0.01 * base ? { ...x, [n]: real } : x)),
+    [base],
+  )
+  for (let i = Math.max(0, centro - VENTANA); i <= Math.min(doc.info.paginas - 1, centro + VENTANA); i++) {
+    vistas.current.add(i)
+  }
   const w = cubeta(ancho * devicePixelRatio)
-  return Array.from({ length: doc.info.paginas }, (_, n) => {
-    const p = prop[n] ?? base
-    return (
-      <div key={n} className="pagina" style={{ width: ancho, height: ancho * p }}>
-        {n >= rango[0] && n <= rango[1] ? (
-          <Imagen
-            src={`${convertFileSrc(String(n), 'pagina')}?w=${w}&d=${doc.id}`}
-            alCargar={(ms, real) => {
-              alCargar(ms)
-              if (Math.abs(real - p) > 0.01 * p) setProp((x) => ({ ...x, [n]: real }))
-            }}
-          />
-        ) : (
-          <span className="numero">{n + 1}</span>
-        )}
-      </div>
-    )
-  })
+  const dentro = (r: Rango, n: number) => n >= r[0] && n <= r[1]
+  return Array.from({ length: doc.info.paginas }, (_, n) => (
+    <Pagina
+      key={n}
+      n={n}
+      id={doc.id}
+      ancho={ancho}
+      alto={ancho * (prop[n] ?? base)}
+      mini={vistas.current.has(n)}
+      nitida={dentro(visibles, n) || dentro(cercanas, n) ? w : 0}
+      medida={medida}
+      alCargar={alCargar}
+    />
+  ))
+})
+
+const Pagina = memo(function Pagina({
+  n,
+  id,
+  ancho,
+  alto,
+  mini,
+  nitida,
+  medida,
+  alCargar,
+}: {
+  n: number
+  id: number
+  ancho: number
+  alto: number
+  mini: boolean
+  nitida: number
+  medida: (n: number, real: number) => void
+  alCargar: (ms: number) => void
+}) {
+  const url = (w: number) => `${convertFileSrc(String(n), 'pagina')}?w=${w}&d=${id}`
+  return (
+    <div className="pagina" style={{ width: ancho, height: alto }}>
+      <span className="numero">{n + 1}</span>
+      {mini && (
+        <img
+          src={url(MINIATURA)}
+          alt=""
+          decoding="async"
+          draggable={false}
+          onLoad={(e) => medida(n, e.currentTarget.naturalHeight / e.currentTarget.naturalWidth)}
+        />
+      )}
+      {nitida > 0 && (
+        <Imagen
+          src={url(nitida)}
+          alCargar={(ms, real) => {
+            alCargar(ms)
+            medida(n, real)
+          }}
+        />
+      )}
+    </div>
+  )
 })
 
 function Imagen({ src, alCargar }: { src: string; alCargar: (ms: number, proporcion: number) => void }) {
   // Al cambiar el zoom cambia src y el mismo <img> sigue mostrando la imagen anterior hasta que llega la nítida.
   const t0 = useMemo(() => performance.now(), [src])
   const [fallo, setFallo] = useState('')
-  if (fallo === src) return <span className="numero">No se pudo mostrar esta página</span>
+  if (fallo === src) return <span className="fallo">No se pudo mostrar esta página</span>
   return (
     <img
       src={src}
       alt=""
+      decoding="async"
       draggable={false}
       onLoad={(e) => alCargar(performance.now() - t0, e.currentTarget.naturalHeight / e.currentTarget.naturalWidth)}
       onError={() => setFallo(src)}
