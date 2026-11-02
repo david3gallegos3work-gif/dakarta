@@ -27,6 +27,7 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .buscar button:hover { background: rgba(0, 0, 0, 0.08); }
 .buscar button:disabled { opacity: 0.4; cursor: default; }
 .buscar-aviso { margin: 0; padding: 0 10px 8px; color: #b71c1c; font-size: 14px; }
+.buscar-nota { margin: 0; padding: 0 10px 8px; color: #455a64; font-size: 14px; }
 
 .cuerpo { position: relative; flex: 1; min-height: 0; display: flex; }
 .visor { flex: 1; overflow: auto; background: #525659; touch-action: pan-x pan-y; overscroll-behavior: contain; }
@@ -79,5 +80,6 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .noche .buscar input { background: #333; border-color: #555; color: #eee; }
 .noche .buscar .cuenta { color: #bbb; }
 .noche .buscar-aviso { color: #ff8a80; }
+.noche .buscar-nota { color: #bbb; }
 .noche .recientes button { background: #242424; border-color: #3a3a3a; }
 .noche .recientes button:hover { background: #2f2f2f; }

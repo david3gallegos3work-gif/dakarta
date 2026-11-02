@@ -36,6 +36,8 @@ pub struct Busqueda {
     resultados: Vec<Coincidencia>,
     /// El PDF no tiene texto (parece escaneado): no hay nada que buscar.
     escaneado: bool,
+    /// Se encontraron más de los que se devuelven: una palabra muy común llenaría la pantalla.
+    truncada: bool,
 }
 
 #[derive(Serialize)]
@@ -58,6 +60,8 @@ struct Entrada {
 /// Ancho de las miniaturas que se ven mientras se desplaza (el mismo valor en src/zoom.ts).
 const MINIATURA: u32 = 384;
 const TOPE_CACHE: usize = 64 * 1024 * 1024;
+/// Tope de coincidencias que se devuelven a la pantalla.
+const TOPE_RESULTADOS: usize = 2000;
 
 /// Pedazo de una página, para hacer zoom sin pintar la hoja entera: w y h son el tamaño de la página entera a ese zoom.
 #[derive(Clone, Copy)]
@@ -240,7 +244,8 @@ fn buscar_doc(doc: &Document, aguja: &str) -> Result<Busqueda, String> {
     let paginas = doc.page_count().map_err(texto)?;
     let mut resultados = Vec::new();
     let mut tiene_texto = false;
-    for n in 0..paginas {
+    let mut truncada = false;
+    'paginas: for n in 0..paginas {
         let pagina = doc.load_page(n).map_err(texto)?;
         let b = pagina.bounds().map_err(texto)?;
         if b.width() <= 0.0 || b.height() <= 0.0 {
@@ -252,6 +257,10 @@ fn buscar_doc(doc: &Document, aguja: &str) -> Result<Busqueda, String> {
         }
         let quads = pagina.search(aguja, 500).map_err(texto)?;
         for q in quads.iter() {
+            if resultados.len() >= TOPE_RESULTADOS {
+                truncada = true;
+                break 'paginas;
+            }
             let x0 = q.ul.x.min(q.ll.x).min(q.ur.x).min(q.lr.x);
             let x1 = q.ul.x.max(q.ll.x).max(q.ur.x).max(q.lr.x);
             let y0 = q.ul.y.min(q.ll.y).min(q.ur.y).min(q.lr.y);
@@ -265,7 +274,7 @@ fn buscar_doc(doc: &Document, aguja: &str) -> Result<Busqueda, String> {
             });
         }
     }
-    Ok(Busqueda { resultados, escaneado: resultados.is_empty() && !tiene_texto })
+    Ok(Busqueda { resultados, escaneado: resultados.is_empty() && !tiene_texto, truncada })
 }
 
 fn pintar(doc: &Document, n: i32, ancho: u32) -> Result<Vec<u8>, String> {
