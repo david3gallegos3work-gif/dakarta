@@ -174,9 +174,9 @@ impl Motor {
         rx.recv().map_err(texto)?
     }
 
-    pub fn buscar(&self, texto: String) -> Result<Busqueda, String> {
+    pub fn buscar(&self, aguja: String) -> Result<Busqueda, String> {
         let (tx, rx) = mpsc::channel();
-        self.0.send(Pedido::Buscar { texto, resp: tx }).map_err(texto)?;
+        self.0.send(Pedido::Buscar { texto: aguja, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
@@ -274,7 +274,8 @@ fn buscar_doc(doc: &Document, aguja: &str) -> Result<Busqueda, String> {
             });
         }
     }
-    Ok(Busqueda { resultados, escaneado: resultados.is_empty() && !tiene_texto, truncada })
+    let escaneado = resultados.is_empty() && !tiene_texto;
+    Ok(Busqueda { resultados, escaneado, truncada })
 }
 
 fn pintar(doc: &Document, n: i32, ancho: u32) -> Result<Vec<u8>, String> {
