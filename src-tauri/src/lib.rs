@@ -37,6 +37,12 @@ async fn buscar(motor: State<'_, Motor>, texto: String) -> Result<Busqueda, Stri
     motor.buscar(texto)
 }
 
+/// Windows: abre la carpeta con el PDF seleccionado para poder enviarlo.
+#[tauri::command]
+fn mostrar_archivo(app: AppHandle, ruta: String) -> Result<(), String> {
+    app.opener().reveal_item_in_dir(ruta).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn elegir_pdf(app: AppHandle, motor: State<'_, Motor>) -> Result<Option<Info>, String> {
     let Some(ruta) = app.dialog().file().add_filter("PDF", &["pdf"]).blocking_pick_file() else {
@@ -103,7 +109,7 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("pagina", |ctx, pedido, resp| {
             ctx.app_handle().state::<Motor>().pagina(pedido.uri(), resp)
         })
-        .invoke_handler(tauri::generate_handler![elegir_pdf, archivo_inicial, abrir_ruta, descargar_version, buscar])
+        .invoke_handler(tauri::generate_handler![elegir_pdf, archivo_inicial, abrir_ruta, descargar_version, buscar, mostrar_archivo])
         .run(tauri::generate_context!())
         .expect("no se pudo iniciar Dakarta");
 }

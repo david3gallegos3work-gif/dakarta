@@ -13,6 +13,7 @@ declare global {
       nombre(uri: string): string | null
       persistir(uri: string): void
       elegir?(): void
+      compartir?(uri: string, nombre: string): void
     }
     /** Android: el botón o gesto "atrás" pregunta si la pantalla lo usó o si toca salir. */
     DakartaAtras?: () => boolean
@@ -503,6 +504,24 @@ export default function App() {
           <>
             <button onClick={() => setVerIndice((x) => !x)} aria-pressed={verIndice} aria-label="Índice" title="Índice">
               ☰
+            </button>
+            <button
+              onClick={() => {
+                setVerIndice(false)
+                // Android: menú de compartir del sistema. Windows: la carpeta con el PDF seleccionado.
+                if (window.DakartaAndroid?.compartir) {
+                  window.DakartaAndroid.compartir(doc.info.ruta, doc.info.nombre)
+                } else {
+                  invoke('mostrar_archivo', { ruta: doc.info.ruta }).catch((e) => {
+                    console.error(e)
+                    setError('No se pudo abrir la carpeta del archivo.')
+                  })
+                }
+              }}
+              aria-label="Compartir"
+              title="Compartir"
+            >
+              ⤴
             </button>
             <button
               onClick={() => (verBuscar ? cerrarBuscar() : setVerBuscar(true))}
