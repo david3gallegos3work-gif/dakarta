@@ -387,9 +387,9 @@ impl Motor {
         rx.recv().map_err(texto)?
     }
 
-    pub fn anotar_sello(&self, n: i32, x: f32, y: f32, texto: String, color: (f32, f32, f32)) -> Result<(), String> {
+    pub fn anotar_sello(&self, n: i32, x: f32, y: f32, etiqueta: String, color: (f32, f32, f32)) -> Result<(), String> {
         let (tx, rx) = mpsc::channel();
-        self.0.send(Pedido::Sello { n, x, y, texto, color, resp: tx }).map_err(texto)?;
+        self.0.send(Pedido::Sello { n, x, y, texto: etiqueta, color, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
@@ -660,14 +660,14 @@ fn anotar_caja(doc: &mut PdfDocument, n: i32, x: f32, y: f32, contenido: &str) -
         return Err("La página está vacía.".into());
     }
     let lineas = envolver(contenido, 38);
-    let texto = lineas.join("\n");
+    let envuelto = lineas.join("\n");
     let alto = (lineas.len() as f32 * 15.0 + 8.0).min(caja.height());
     let ancho = (caja.width() * 0.6).min(260.0);
     let x0 = (caja.x0 + x.clamp(0.0, 1.0) * caja.width()).min(caja.x1 - ancho).max(caja.x0);
     let y0 = (caja.y0 + y.clamp(0.0, 1.0) * caja.height()).min(caja.y1 - alto).max(caja.y0);
     let rect = Rect::new(x0, y0, x0 + ancho, y0 + alto);
     let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
-    let mut annot = pdf.add_free_text_annotation(rect, &texto).map_err(texto)?;
+    let mut annot = pdf.add_free_text_annotation(rect, &envuelto).map_err(texto)?;
     annot
         .set_default_appearance("Helv", 12.0, Some(AnnotationColor::Rgb { red: 0.0, green: 0.0, blue: 0.0 }))
         .map_err(texto)?;
@@ -684,7 +684,7 @@ fn anotar_sello(
     n: i32,
     x: f32,
     y: f32,
-    texto: &str,
+    etiqueta: &str,
     color: (f32, f32, f32),
 ) -> Result<i32, String> {
     let pagina = doc.load_page(n).map_err(texto)?;
@@ -698,7 +698,7 @@ fn anotar_sello(
     let y0 = (caja.y0 + y.clamp(0.0, 1.0) * caja.height() - alto / 2.0).clamp(caja.y0, caja.y1 - alto);
     let rect = Rect::new(x0, y0, x0 + ancho, y0 + alto);
     let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
-    let mut annot = pdf.add_free_text_annotation(rect, texto).map_err(texto)?;
+    let mut annot = pdf.add_free_text_annotation(rect, etiqueta).map_err(texto)?;
     annot
         .set_default_appearance("Helv", 18.0, Some(anotacion_color(color)))
         .map_err(texto)?;
