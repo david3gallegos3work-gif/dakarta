@@ -81,6 +81,7 @@ METODOS = r'''
   override fun onWebViewCreate(webView: android.webkit.WebView) {
     super.onWebViewCreate(webView)
     vista = webView
+    puente.vista = webView
     webView.addJavascriptInterface(puente, "DakartaAndroid")
   }
 }
@@ -88,6 +89,7 @@ METODOS = r'''
 class PuenteDakarta(private val actividad: android.app.Activity) {
   @Volatile var uri: String? = null
   @Volatile var guardado: String? = null
+  @Volatile var vista: android.webkit.WebView? = null
 
   @android.webkit.JavascriptInterface
   fun pendiente(): String? {
