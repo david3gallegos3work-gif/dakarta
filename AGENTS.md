@@ -92,7 +92,7 @@ De estos cuatro, ya están el 1, el 3 y el 4. Falta el 2.
 ## Plan por etapas
 
 1. **Fase 1 — Prueba de velocidad:** abrir PDFs, pasar páginas, zoom, índice, modo noche. Medir tiempos con el PDF más pesado de David (idealmente un escaneado de 1000 hojas). Si va lento, corregir aquí antes de seguir.
-2. **Fase 2 — Anotar y firmar:** resaltar, subrayar, tachar, dibujar a mano, notas, cuadros de texto, sellos, rellenar formularios, firma dibujada, firma digital con certificado.
+2. **Fase 2 — Anotar y firmar:** resaltar, subrayar, tachar, dibujar a mano, notas, cuadros de texto, sellos, rellenar formularios y firma dibujada. La firma digital con certificado quedó descartada por David (2026-11-02).
 3. **Fase 3 — Unir y organizar páginas** (ver detalle abajo).
 4. **Fase 4 — Otros formatos:** TXT (ver y editar), DOCX (ver y edición sencilla), EPUB/FB2/XPS/CBZ (MuPDF ya los abre).
 5. **Fase 5 — Gemini** (ver detalle abajo).
@@ -104,6 +104,7 @@ De estos cuatro, ya están el 1, el 3 y el 4. Falta el 2.
 - **Adobe Document Cloud / "enviar para firmar" con seguimiento:** depende de servidores de Adobe.
 - **Word/Excel/PowerPoint → PDF con fidelidad perfecta:** requeriría LibreOffice, demasiado pesado.
 - **Firmas con confianza AATL de Adobe:** requieren certificados de pago.
+- **Firma digital con certificado:** David decidió no hacerla (2026-11-02); solo firma dibujada.
 
 ## Edición limitada: reglas obligatorias de interfaz
 
@@ -112,19 +113,18 @@ La idea es **limitar de verdad**, no solo avisar. El usuario no debe encontrar b
 ### 1. Aviso al entrar en modo edición (una vez por archivo, con casilla "Entendido, no volver a mostrar")
 
 - **DOCX:** «Modo edición sencilla: puedes cambiar texto, negritas, cursivas, subrayado, títulos y listas. Las tablas, imágenes y el diseño original se conservan, pero no se pueden modificar aquí.»
-- **PDF:** «Edición básica de PDF: puedes corregir palabras o frases cortas, resaltar, escribir notas, firmar y rellenar formularios. Cambiar párrafos completos o el diseño de la página no es posible en un PDF.»
+- **PDF:** «Edición básica de PDF: puedes resaltar, subrayar, tachar, dibujar a mano, escribir notas y cuadros de texto, firmar dibujando y rellenar formularios. No se puede cambiar el texto original, las imágenes ni el diseño de la página. Al guardar se crea una copia; el archivo original no se toca.» El aviso en la app muestra solo las herramientas que ya existen en esa entrega.
 
 ### 2. La barra de herramientas solo muestra lo permitido
 
 - **DOCX:** negrita, cursiva, subrayado, títulos, viñetas, listas numeradas, deshacer/rehacer. Nada más.
-- **PDF:** editar texto corto, resaltar, dibujar, nota, firma, formulario.
+- **PDF:** resaltar, subrayar, tachar, dibujar, nota, cuadro de texto, firma dibujada, formulario.
 - Botón **ⓘ «¿Qué puedo editar?»** con la lista de lo que se puede y lo que no.
 
 ### 3. Bloqueo con explicación al intentar algo no permitido
 
 - Tocar una tabla o imagen en DOCX: «Esta parte del documento está protegida para no dañar su formato.»
-- Texto nuevo en PDF más largo que el original: no dejar pasar el límite y avisar «El texto nuevo no cabe en el espacio original. Escribe uno más corto o usa una Nota.»
-- Letra que no existe en la fuente incrustada del PDF (tildes, ñ): «Esta fuente no permite esa letra; se usará una fuente parecida.»
+- Si una herramienta todavía no existe en esa entrega, no mostrarla: el usuario no debe encontrar botones que no funcionan.
 
 ### 4. Guardar
 

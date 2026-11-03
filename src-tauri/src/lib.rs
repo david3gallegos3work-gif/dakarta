@@ -37,6 +37,61 @@ async fn buscar(motor: State<'_, Motor>, texto: String) -> Result<Busqueda, Stri
     motor.buscar(texto)
 }
 
+#[tauri::command]
+async fn anotar_texto(
+    motor: State<'_, Motor>,
+    pagina: i32,
+    tipo: String,
+    rojo: f32,
+    verde: f32,
+    azul: f32,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+) -> Result<(), String> {
+    motor.anotar_texto(pagina, &tipo, (rojo, verde, azul), (x0, y0), (x1, y1))
+}
+
+#[tauri::command]
+async fn anotar_tinta(
+    motor: State<'_, Motor>,
+    pagina: i32,
+    rojo: f32,
+    verde: f32,
+    azul: f32,
+    grosor: f32,
+    puntos: Vec<(f32, f32)>,
+) -> Result<(), String> {
+    motor.anotar_tinta(pagina, (rojo, verde, azul), grosor, puntos)
+}
+
+#[tauri::command]
+async fn deshacer(motor: State<'_, Motor>) -> Result<bool, String> {
+    motor.deshacer()
+}
+
+/// Android: deja la copia editada en la caché; la app la copia al destino elegido por el usuario.
+#[tauri::command]
+async fn guardar_en_cache(app: AppHandle, motor: State<'_, Motor>) -> Result<String, String> {
+    let copia = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("copia.pdf");
+    let ruta = copia.to_string_lossy().into_owned();
+    motor.guardar(ruta.clone())?;
+    Ok(ruta)
+}
+
+/// Windows: pregunta dónde guardar y escribe la copia ahí.
+#[tauri::command]
+async fn guardar_copia(app: AppHandle, motor: State<'_, Motor>, nombre: String) -> Result<Option<String>, String> {
+    let Some(ruta) = app.dialog().file().set_file_name(nombre).add_filter("PDF", &["pdf"]).blocking_save_file() else {
+        return Ok(None);
+    };
+    let ruta = ruta.into_path().map_err(|e| e.to_string())?;
+    let destino = ruta.to_string_lossy().into_owned();
+    motor.guardar(destino.clone())?;
+    Ok(Some(destino))
+}
+
 /// Windows: abre la carpeta con el PDF seleccionado para poder enviarlo.
 #[tauri::command]
 fn mostrar_archivo(app: AppHandle, ruta: String) -> Result<(), String> {
@@ -109,7 +164,19 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("pagina", |ctx, pedido, resp| {
             ctx.app_handle().state::<Motor>().pagina(pedido.uri(), resp)
         })
-        .invoke_handler(tauri::generate_handler![elegir_pdf, archivo_inicial, abrir_ruta, descargar_version, buscar, mostrar_archivo])
+        .invoke_handler(tauri::generate_handler![
+    elegir_pdf,
+    archivo_inicial,
+    abrir_ruta,
+    descargar_version,
+    buscar,
+    mostrar_archivo,
+    anotar_texto,
+    anotar_tinta,
+    deshacer,
+    guardar_en_cache,
+    guardar_copia
+])
         .run(tauri::generate_context!())
         .expect("no se pudo iniciar Dakarta");
 }

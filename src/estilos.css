@@ -30,6 +30,21 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .buscar-aviso { margin: 0; padding: 0 10px 8px; color: #b71c1c; font-size: 14px; }
 .buscar-nota { margin: 0; padding: 0 10px 8px; color: #455a64; font-size: 14px; }
 
+.editar { flex: none; display: flex; align-items: center; gap: 4px; padding: 6px; overflow-x: auto; white-space: nowrap; background: #e8eef5; border-bottom: 1px solid #cfd8e3; scrollbar-width: none; }
+.editar::-webkit-scrollbar { display: none; }
+.editar button { min-height: 34px; padding: 0 10px; border: 1px solid #9fb3c8; border-radius: 6px; background: #fff; color: #1a1a1a; font: inherit; font-size: 14px; cursor: pointer; }
+.editar button[aria-pressed='true'] { background: #1565c0; border-color: #1565c0; color: #fff; }
+.editar button:disabled { opacity: 0.4; cursor: default; }
+.editar .colores, .editar .grosores { display: flex; gap: 4px; flex: none; }
+.editar .grosores button { padding: 0 8px; }
+.editar .color { width: 28px; min-width: 28px; height: 28px; min-height: 28px; padding: 0; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #9fb3c8; }
+.editar .color[aria-pressed='true'] { box-shadow: 0 0 0 2px #1565c0; }
+.editar .sin-guardar { flex: none; padding: 0 6px; color: #b71c1c; font-size: 13px; }
+
+.preview { position: absolute; pointer-events: none; }
+.preview-texto { position: absolute; background: rgba(21, 101, 192, 0.3); border: 1px solid rgba(21, 101, 192, 0.8); }
+.preview svg { display: block; width: 100%; height: 100%; }
+
 .cuerpo { position: relative; flex: 1; min-height: 0; display: flex; }
 .visor { flex: 1; overflow: auto; background: #525659; touch-action: pan-x pan-y; overscroll-behavior: contain; }
 .contenido { position: relative; transform-origin: 0 0; width: max-content; min-width: 100%; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); }
@@ -75,6 +90,13 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .aviso-version span { flex: 1; }
 .aviso-version button { min-height: 32px; padding: 0 10px; border: 0; border-radius: 6px; background: #1565c0; color: #fff; font: inherit; cursor: pointer; }
 .aviso-version button:last-child { background: transparent; color: inherit; font-size: 18px; }
+.aviso-ok { position: absolute; z-index: 3; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%); padding: 8px 14px; border-radius: 8px; background: #e8f5e9; color: #1b5e20; font-size: 14px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); }
+.fondo-aviso { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(0, 0, 0, 0.5); }
+.tarjeta-aviso { width: min(440px, 100%); max-height: 100%; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 20px; border-radius: 12px; background: #fff; color: #1a1a1a; }
+.tarjeta-aviso h2 { margin: 0; font-size: 18px; }
+.tarjeta-aviso p { margin: 0; font-size: 15px; line-height: 1.45; }
+.tarjeta-aviso label { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.tarjeta-aviso .grande { align-self: flex-end; }
 
 /* Modo noche: la página se invierte (fondo oscuro, letras claras) y se corrigen los colores de las fotos. */
 .noche .barra { background: #111; }
@@ -94,3 +116,10 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .noche .recientes-panel h2 { color: #bbb; }
 .noche .recientes-panel button { background: #2f2f2f; border-color: #3a3a3a; }
 .noche .recientes-panel button:hover { background: #3a3a3a; }
+.noche .editar { background: #222; border-color: #333; }
+.noche .editar button { background: #2f2f2f; border-color: #444; color: #eee; }
+.noche .editar button[aria-pressed='true'] { background: #1565c0; border-color: #1565c0; color: #fff; }
+.noche .editar .color { border-color: #1a1a1a; box-shadow: 0 0 0 1px #777; }
+.noche .editar .sin-guardar { color: #ff8a80; }
+.noche .aviso-ok { background: #1b5e20; color: #e8f5e9; }
+.noche .tarjeta-aviso { background: #1a1a1a; color: #eee; }
