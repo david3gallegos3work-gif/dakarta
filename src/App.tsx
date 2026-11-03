@@ -14,6 +14,9 @@ declare global {
       persistir(uri: string): void
       elegir?(): void
       compartir?(uri: string, nombre: string): void
+      guardar?(nombre: string): void
+      destino?(): string | null
+      copiar?(destino: string, origen: string): boolean
     }
     /** Android: el botón o gesto "atrás" pregunta si la pantalla lo usó o si toca salir. */
     DakartaAtras?: () => boolean
@@ -37,6 +40,54 @@ type Busqueda = { texto: string; resultados: Coincidencia[]; escaneado: boolean;
 /** Punto de una página que debe quedar en el mismo lugar de la pantalla tras un zoom o un giro. */
 type Ancla = { i: number; fx: number; fy: number; vx: number; vy: number }
 type Rango = [number, number]
+type Herramienta = 'mover' | 'resaltar' | 'subrayar' | 'tachar' | 'lapiz'
+type Preview = {
+  left: number
+  top: number
+  width: number
+  height: number
+  modo: 'texto' | 'tinta'
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+  puntos: [number, number][]
+}
+
+const COLORES_TEXTO: ReadonlyArray<readonly [string, string]> = [
+  ['#ffeb3b', 'Amarillo'],
+  ['#a5d6a7', 'Verde'],
+  ['#f8bbd0', 'Rosado'],
+  ['#90caf9', 'Celeste'],
+]
+const COLORES_LAPIZ: ReadonlyArray<readonly [string, string]> = [
+  ['#000000', 'Negro'],
+  ['#d32f2f', 'Rojo'],
+  ['#1565c0', 'Azul'],
+  ['#2e7d32', 'Verde'],
+]
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
+const rgb = (hex: string): [number, number, number] => {
+  const n = parseInt(hex.slice(1), 16)
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]
+}
+
+/** Android: el selector de "Guardar copia" avisa por un evento; aquí se espera su destino. */
+function esperarDestino(nombre: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const puente = window.DakartaAndroid
+    if (!puente?.guardar) {
+      resolve(null)
+      return
+    }
+    const al = () => {
+      window.removeEventListener('dakarta-guardar', al)
+      resolve(puente.destino?.() ?? null)
+    }
+    window.addEventListener('dakarta-guardar', al)
+    puente.guardar(nombre)
+  })
+}
 
 const MARGEN = 8
 /** Páginas a cada lado de la actual cuya miniatura ya se pide. */
@@ -80,6 +131,22 @@ export default function App() {
   const [anchoVisor, setAnchoVisor] = useState(0)
   const [nueva, setNueva] = useState<Actualizacion | null>(null)
   const [recientes, setRecientes] = useState<Reciente[]>(leerRecientes)
+  const [editando, setEditando] = useState(false)
+  const [herramienta, setHerramienta] = useState<Herramienta>('mover')
+  const [colorTexto, setColorTexto] = useState(COLORES_TEXTO[0][0])
+  const [colorLapiz, setColorLapiz] = useState(COLORES_LAPIZ[0][0])
+  const [grosor, setGrosor] = useState(3)
+  const [revision, setRevision] = useState(0)
+  const [sucio, setSucio] = useState(false)
+  const [hechas, setHechas] = useState(0)
+  const [avisoEdicion, setAvisoEdicion] = useState(false)
+  const [ayudaManual, setAyudaManual] = useState(false)
+  const [recordarAviso, setRecordarAviso] = useState(false)
+  const [preview, setPreview] = useState<Preview | null>(null)
+  const [rutaActual, setRutaActual] = useState('')
+  const [nombreActual, setNombreActual] = useState('')
+  const [exito, setExito] = useState('')
+  const [guardando, setGuardando] = useState(false)
   const [verBuscar, setVerBuscar] = useState(false)
   const [textoBuscar, setTextoBuscar] = useState('')
   const [busqueda, setBusqueda] = useState<Busqueda | null>(null)
@@ -88,6 +155,17 @@ export default function App() {
   const visor = useRef<HTMLDivElement>(null)
   const contenido = useRef<HTMLDivElement>(null)
   const arrastre = useRef<{ x: number; y: number } | null>(null)
+  const gesto = useRef<{
+    n: number
+    page: HTMLElement
+    modo: 'texto' | 'tinta'
+    tipo: Herramienta
+    puntos: [number, number][]
+  } | null>(null)
+  const avisoVisto = useRef(false)
+  const sucioRef = useRef(sucio)
+  const editandoRef = useRef(editando)
+  const herramientaRef = useRef(herramienta)
   const zoomRef = useRef(zoom)
   const ajuste = useRef<Ancla | null>(null)
   const reloj = useRef(0)
@@ -95,6 +173,9 @@ export default function App() {
   const ultimoY = useRef(0)
   const pedidoBusqueda = useRef(0)
   zoomRef.current = zoom
+  sucioRef.current = sucio
+  editandoRef.current = editando
+  herramientaRef.current = herramienta
 
   const hijos = () => contenido.current!.children as HTMLCollectionOf<HTMLElement>
 
@@ -245,6 +326,11 @@ export default function App() {
     const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
     const medio = (t: TouchList) => punto((t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2)
     const inicio = (e: TouchEvent) => {
+      // Con una herramienta de edición el dedo dibuja o selecciona: no se mueve ni se hace zoom.
+      if (editandoRef.current && herramientaRef.current !== 'mover') {
+        toque = null
+        return
+      }
       if (e.touches.length !== 2) {
         toque = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY, t: performance.now() } : null
         return
@@ -398,6 +484,13 @@ export default function App() {
       const info = await pedido
       if (info) {
         setDoc((d) => ({ info, id: (d?.id ?? 0) + 1 }))
+        setRutaActual(info.ruta)
+        setNombreActual(info.nombre)
+        setEditando(false)
+        setSucio(false)
+        setHechas(0)
+        setPreview(null)
+        avisoVisto.current = false
         setZoom(1)
         setVerIndice(false)
         setCentro(0)
@@ -432,8 +525,11 @@ export default function App() {
     }
   }
 
+  const puedeCambiar = () => !sucio || confirm('Hay cambios sin guardar. ¿Abrir otro PDF y perderlos?')
+
   // En Android el selector lo abre la propia app: así el permiso queda guardado y el archivo se puede reabrir otro día.
   const abrir = () => {
+    if (!puedeCambiar()) return
     const puente = window.DakartaAndroid
     if (puente?.elegir) {
       puente.elegir()
@@ -441,6 +537,102 @@ export default function App() {
     }
     cargar(invoke<Info | null>('elegir_pdf'))
   }
+
+  const abrirReciente = (r: Reciente) => {
+    if (!puedeCambiar()) return
+    cargar(invoke<Info>('abrir_ruta', { ruta: r.ruta }), r)
+  }
+
+  const entrarEditar = () => {
+    setEditando(true)
+    setHerramienta('mover')
+    setAyudaManual(false)
+    let oculto = false
+    try {
+      oculto = localStorage.getItem('avisoEdicion') === '1'
+    } catch {
+      // sin almacenamiento: el aviso se muestra siempre
+    }
+    if (!oculto && !avisoVisto.current) setAvisoEdicion(true)
+  }
+
+  const cerrarAviso = () => {
+    if (!ayudaManual) {
+      if (recordarAviso) {
+        try {
+          localStorage.setItem('avisoEdicion', '1')
+        } catch {
+          // sin almacenamiento: se vuelve a mostrar la próxima vez
+        }
+      }
+      avisoVisto.current = true
+    }
+    setAvisoEdicion(false)
+    setAyudaManual(false)
+  }
+
+  const abrirAyuda = () => {
+    setAyudaManual(true)
+    setAvisoEdicion(true)
+  }
+
+  const salirEditar = () => {
+    setEditando(false)
+    setHerramienta('mover')
+    setPreview(null)
+  }
+
+  const deshacer = async () => {
+    try {
+      const hecho = await invoke<boolean>('deshacer')
+      if (!hecho) return
+      setRevision((r) => r + 1)
+      setSucio(true)
+      setHechas((h) => Math.max(0, h - 1))
+    } catch (e) {
+      console.error(e)
+      setError(String(e))
+    }
+  }
+
+  const guardarCopia = async () => {
+    if (!doc || guardando) return
+    const base = (nombreActual || doc.info.nombre).replace(/\.pdf$/i, '')
+    const nombre = `${base || 'Documento'} (anotado).pdf`
+    setGuardando(true)
+    try {
+      const puente = window.DakartaAndroid
+      let destino: string | null
+      if (puente?.guardar && puente.copiar) {
+        destino = await esperarDestino(nombre)
+        if (!destino) return
+        const cache = await invoke<string>('guardar_en_cache')
+        if (!puente.copiar(destino, cache)) throw new Error('No se pudo copiar la copia.')
+        puente.persistir(destino)
+      } else {
+        destino = await invoke<string | null>('guardar_copia', { nombre })
+        if (!destino) return
+      }
+      const guardada = destino
+      const nombreDestino = puente?.nombre(guardada) || nombre
+      setRutaActual(guardada)
+      setNombreActual(nombreDestino)
+      setRecientes((lista) => guardarReciente(lista, { ruta: guardada, nombre: nombreDestino }))
+      setSucio(false)
+      setExito('Copia guardada')
+    } catch (e) {
+      console.error(e)
+      setError('No se pudo guardar la copia. Inténtalo otra vez.')
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!exito) return
+    const t = setTimeout(() => setExito(''), 3000)
+    return () => clearTimeout(t)
+  }, [exito])
 
   // El botón o gesto "atrás" de Android cierra primero el panel o la búsqueda; si no hay nada abierto, sale.
   useEffect(() => {
@@ -453,12 +645,31 @@ export default function App() {
         cerrarBuscar()
         return true
       }
+      if (sucio) return !confirm('Hay cambios sin guardar. ¿Salir de Dakarta y perderlos?')
       return false
     }
     return () => {
       delete window.DakartaAtras
     }
-  }, [verIndice, verBuscar, cerrarBuscar])
+  }, [verIndice, verBuscar, cerrarBuscar, sucio])
+
+  // Windows: avisar antes de cerrar la ventana si hay cambios sin guardar.
+  useEffect(() => {
+    if (window.DakartaAndroid || !('__TAURI_INTERNALS__' in window)) return
+    let des = () => {}
+    import('@tauri-apps/api/window')
+      .then(({ getCurrentWindow }) =>
+        getCurrentWindow()
+          .onCloseRequested((e) => {
+            if (sucio && !confirm('Hay cambios sin guardar. ¿Cerrar Dakarta y perderlos?')) e.preventDefault()
+          })
+          .then((u) => {
+            des = u
+          }),
+      )
+      .catch(() => {})
+    return () => des()
+  }, [sucio])
 
   // "Abrir con Dakarta": Windows lo entrega al arrancar; Android también con la app ya abierta, al volver a ella.
   // Si nadie mandó un archivo, se reabre el último que se usó.
@@ -507,12 +718,13 @@ export default function App() {
             </button>
             <button
               onClick={() => {
+                if (sucio && !confirm('Hay cambios sin guardar. Se compartirá el archivo original, sin los cambios. ¿Continuar?')) return
                 setVerIndice(false)
                 // Android: menú de compartir del sistema. Windows: la carpeta con el PDF seleccionado.
                 if (window.DakartaAndroid?.compartir) {
-                  window.DakartaAndroid.compartir(doc.info.ruta, doc.info.nombre)
+                  window.DakartaAndroid.compartir(rutaActual, nombreActual)
                 } else {
-                  invoke('mostrar_archivo', { ruta: doc.info.ruta }).catch((e) => {
+                  invoke('mostrar_archivo', { ruta: rutaActual }).catch((e) => {
                     console.error(e)
                     setError('No se pudo abrir la carpeta del archivo.')
                   })
@@ -535,6 +747,16 @@ export default function App() {
               title="Buscar en el documento"
             >
               🔍
+            </button>
+            <button
+              onClick={() => (editando ? salirEditar() : entrarEditar())}
+              aria-pressed={editando}
+              aria-label="Editar PDF"
+              title="Editar PDF"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 20h4L19 9l-4-4L4 16v4z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+              </svg>
             </button>
             <span className="pag">
               <input
@@ -621,6 +843,59 @@ export default function App() {
         </div>
       )}
 
+      {editando && doc && (
+        <div className="editar">
+          <button aria-pressed={herramienta === 'mover'} onClick={() => setHerramienta('mover')}>
+            Mover
+          </button>
+          <button aria-pressed={herramienta === 'resaltar'} onClick={() => setHerramienta('resaltar')}>
+            Resaltar
+          </button>
+          <button aria-pressed={herramienta === 'subrayar'} onClick={() => setHerramienta('subrayar')}>
+            Subrayar
+          </button>
+          <button aria-pressed={herramienta === 'tachar'} onClick={() => setHerramienta('tachar')}>
+            Tachar
+          </button>
+          <button aria-pressed={herramienta === 'lapiz'} onClick={() => setHerramienta('lapiz')}>
+            Lápiz
+          </button>
+          <span className="colores">
+            {(herramienta === 'lapiz' ? COLORES_LAPIZ : COLORES_TEXTO).map(([c, n]) => (
+              <button
+                key={c}
+                className="color"
+                style={{ background: c }}
+                aria-label={n}
+                title={n}
+                aria-pressed={(herramienta === 'lapiz' ? colorLapiz : colorTexto) === c}
+                onClick={() => (herramienta === 'lapiz' ? setColorLapiz(c) : setColorTexto(c))}
+              />
+            ))}
+          </span>
+          {herramienta === 'lapiz' && (
+            <span className="grosores">
+              {[1.5, 3, 6].map((g) => (
+                <button key={g} aria-pressed={grosor === g} onClick={() => setGrosor(g)}>
+                  {g === 1.5 ? 'Fino' : g === 3 ? 'Medio' : 'Grueso'}
+                </button>
+              ))}
+            </span>
+          )}
+          <button onClick={deshacer} disabled={!hechas}>
+            Deshacer
+          </button>
+          <button onClick={guardarCopia} disabled={guardando}>
+            {guardando ? 'Guardando…' : 'Guardar copia'}
+          </button>
+          <button onClick={salirEditar}>Listo</button>
+          <button onClick={abrirAyuda} title="¿Qué puedo editar?">
+            ⓘ ¿Qué puedo editar?
+          </button>
+          {sucio && <span className="sin-guardar">Sin guardar</span>}
+        </div>
+      )}
+
       <div className="cuerpo">
         {doc && verIndice && (
           <nav
@@ -647,11 +922,7 @@ export default function App() {
                 <ul>
                   {recientes.slice(0, 4).map((r) => (
                     <li key={r.ruta}>
-                      <button
-                        onClick={() => cargar(invoke<Info>('abrir_ruta', { ruta: r.ruta }), r)}
-                        disabled={abriendo}
-                        title={r.nombre}
-                      >
+                      <button onClick={() => abrirReciente(r)} disabled={abriendo} title={r.nombre}>
                         {r.nombre}
                       </button>
                     </li>
@@ -678,13 +949,100 @@ export default function App() {
           onClick={() => {
             if (verIndice) setVerIndice(false)
           }}
+          style={editando && herramienta !== 'mover' ? { touchAction: 'none' } : undefined}
           onScroll={() => {
             medir()
             clearTimeout(relojVecinas.current)
             if (!reloj.current) reloj.current = window.setTimeout(seguir, 100)
           }}
         >
-          <div className="contenido" ref={contenido}>
+          <div
+            className="contenido"
+            ref={contenido}
+            onPointerDown={(e) => {
+              if (!editando || herramienta === 'mover' || !doc) return
+              const page = (e.target as HTMLElement).closest('.pagina') as HTMLElement | null
+              if (!page) return
+              const n = Number(page.dataset.n)
+              if (!Number.isInteger(n)) return
+              e.preventDefault()
+              e.currentTarget.setPointerCapture(e.pointerId)
+              const r = page.getBoundingClientRect()
+              const fx = clamp01((e.clientX - r.left) / r.width)
+              const fy = clamp01((e.clientY - r.top) / r.height)
+              const modo = herramienta === 'lapiz' ? 'tinta' : 'texto'
+              gesto.current = { n, page, modo, tipo: herramienta, puntos: [[fx, fy]] }
+              setPreview({
+                left: page.offsetLeft,
+                top: page.offsetTop,
+                width: page.offsetWidth,
+                height: page.offsetHeight,
+                modo,
+                x0: fx,
+                y0: fy,
+                x1: fx,
+                y1: fy,
+                puntos: [[fx, fy]],
+              })
+            }}
+            onPointerMove={(e) => {
+              const g = gesto.current
+              if (!g) return
+              e.preventDefault()
+              const r = g.page.getBoundingClientRect()
+              const fx = clamp01((e.clientX - r.left) / r.width)
+              const fy = clamp01((e.clientY - r.top) / r.height)
+              if (g.modo === 'tinta') {
+                g.puntos.push([fx, fy])
+                const puntos = [...g.puntos]
+                setPreview((p) => (p ? { ...p, puntos, x1: fx, y1: fy } : p))
+              } else {
+                setPreview((p) => (p ? { ...p, x1: fx, y1: fy } : p))
+              }
+            }}
+            onPointerUp={(e) => {
+              const g = gesto.current
+              gesto.current = null
+              setPreview(null)
+              if (!g) return
+              const r = g.page.getBoundingClientRect()
+              const fx = clamp01((e.clientX - r.left) / r.width)
+              const fy = clamp01((e.clientY - r.top) / r.height)
+              const listo = () => {
+                setRevision((v) => v + 1)
+                setSucio(true)
+                setHechas((h) => h + 1)
+              }
+              const fallo = (err: unknown) => {
+                console.error(err)
+                setError(String(err))
+              }
+              if (g.modo === 'tinta') {
+                if (g.puntos.length < 2) return
+                const [rojo, verde, azul] = rgb(colorLapiz)
+                invoke('anotar_tinta', { pagina: g.n, rojo, verde, azul, grosor, puntos: g.puntos }).then(listo).catch(fallo)
+              } else {
+                const [rojo, verde, azul] = rgb(colorTexto)
+                invoke('anotar_texto', {
+                  pagina: g.n,
+                  tipo: g.tipo,
+                  rojo,
+                  verde,
+                  azul,
+                  x0: g.puntos[0][0],
+                  y0: g.puntos[0][1],
+                  x1: fx,
+                  y1: fy,
+                })
+                  .then(listo)
+                  .catch(fallo)
+              }
+            }}
+            onPointerCancel={() => {
+              gesto.current = null
+              setPreview(null)
+            }}
+          >
             {doc && (
               <Paginas
                 key={doc.id}
@@ -697,7 +1055,36 @@ export default function App() {
                 recortes={recortes}
                 busqueda={busqueda}
                 coincidencia={coincidencia}
+                revision={revision}
               />
+            )}
+            {preview && (
+              <div
+                className="preview"
+                style={{ left: preview.left, top: preview.top, width: preview.width, height: preview.height }}
+              >
+                {preview.modo === 'texto' ? (
+                  <div
+                    className="preview-texto"
+                    style={{
+                      left: `${Math.min(preview.x0, preview.x1) * 100}%`,
+                      top: `${Math.min(preview.y0, preview.y1) * 100}%`,
+                      width: `${Math.abs(preview.x1 - preview.x0) * 100}%`,
+                      height: `${Math.abs(preview.y1 - preview.y0) * 100}%`,
+                    }}
+                  />
+                ) : (
+                  <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <polyline
+                      points={preview.puntos.map(([x, y]) => `${x * 100},${y * 100}`).join(' ')}
+                      fill="none"
+                      stroke={colorLapiz}
+                      strokeWidth={Math.max(1, grosor)}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  </svg>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -714,11 +1101,7 @@ export default function App() {
                 <ul>
                   {recientes.map((r) => (
                     <li key={r.ruta}>
-                      <button
-                        onClick={() => cargar(invoke<Info>('abrir_ruta', { ruta: r.ruta }), r)}
-                        disabled={abriendo}
-                        title={r.nombre}
-                      >
+                      <button onClick={() => abrirReciente(r)} disabled={abriendo} title={r.nombre}>
                         {r.nombre}
                       </button>
                     </li>
@@ -736,6 +1119,11 @@ export default function App() {
             {error} (tocar para cerrar)
           </button>
         )}
+        {exito && (
+          <div className="aviso-ok" role="status">
+            {exito}
+          </div>
+        )}
         {nueva && (
           <div className="aviso-version" role="status">
             <span>Hay una versión nueva de Dakarta ({nueva.version}).</span>
@@ -752,6 +1140,29 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {avisoEdicion && (
+        <div className="fondo-aviso" role="dialog" aria-modal="true" aria-labelledby="titulo-edicion">
+          <div className="tarjeta-aviso">
+            <h2 id="titulo-edicion">Edición básica de PDF</h2>
+            <p>
+              Puedes resaltar, subrayar, tachar y dibujar a mano. No se puede cambiar el texto original, las imágenes ni el
+              diseño de la página: el PDF está hecho para leerse, no para editarse. Al guardar se crea una copia; el archivo
+              original no se toca.
+            </p>
+            <p>Si sales sin guardar, se pierden los cambios.</p>
+            {!ayudaManual && (
+              <label>
+                <input type="checkbox" checked={recordarAviso} onChange={(e) => setRecordarAviso(e.currentTarget.checked)} />
+                Entendido, no volver a mostrar
+              </label>
+            )}
+            <button className="grande" onClick={cerrarAviso}>
+              Entendido
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -771,6 +1182,7 @@ const Paginas = memo(function Paginas({
   recortes,
   busqueda,
   coincidencia,
+  revision,
 }: {
   doc: Doc
   ancho: number
@@ -781,6 +1193,7 @@ const Paginas = memo(function Paginas({
   recortes: Recorte[]
   busqueda: Busqueda | null
   coincidencia: number
+  revision: number
 }) {
   // Alto/ancho real de las páginas ya pintadas que no miden como la primera.
   const [prop, setProp] = useState<Record<number, number>>({})
@@ -821,6 +1234,7 @@ const Paginas = memo(function Paginas({
         resaltados={resaltados}
         actual={resaltados?.some((x) => x.i === coincidencia) ? coincidencia : -1}
         medida={medida}
+        revision={revision}
       />
     )
   })
@@ -837,6 +1251,7 @@ const Pagina = memo(function Pagina({
   resaltados,
   actual,
   medida,
+  revision,
 }: {
   n: number
   id: number
@@ -848,10 +1263,11 @@ const Pagina = memo(function Pagina({
   resaltados?: { c: Coincidencia; i: number }[]
   actual: number
   medida: (n: number, real: number) => void
+  revision: number
 }) {
-  const url = (w: number) => `${convertFileSrc(String(n), 'pagina')}?w=${w}&d=${id}`
+  const url = (w: number) => `${convertFileSrc(String(n), 'pagina')}?w=${w}&d=${id}&v=${revision}`
   return (
-    <div className="pagina" style={{ width: ancho, height: alto }}>
+    <div className="pagina" data-n={n} style={{ width: ancho, height: alto }}>
       <span className="numero">{n + 1}</span>
       {mini && (
         <img
@@ -863,7 +1279,7 @@ const Pagina = memo(function Pagina({
         />
       )}
       {nitida > 0 && <Imagen src={url(nitida)} alCargar={(real) => medida(n, real)} />}
-      {recorte && <Detalle r={recorte} id={id} />}
+      {recorte && <Detalle r={recorte} id={id} revision={revision} />}
       {resaltados?.map(({ c, i }) => (
         <span
           key={i}
@@ -884,9 +1300,9 @@ const Pagina = memo(function Pagina({
  * El recorte con el detalle exacto. Se posiciona en % de la página: al cambiar el zoom sigue en su sitio, solo estirado.
  * El anterior se queda visible hasta que llega el nuevo; encima, el nuevo es transparente mientras no ha cargado.
  */
-function Detalle({ r, id }: { r: Recorte; id: number }) {
+function Detalle({ r, id, revision }: { r: Recorte; id: number; revision: number }) {
   const direccion = (c: Recorte) =>
-    `${convertFileSrc(String(c.n), 'pagina')}?w=${c.W}&h=${c.H}&x=${c.x}&y=${c.y}&cw=${c.cw}&ch=${c.ch}&d=${id}`
+    `${convertFileSrc(String(c.n), 'pagina')}?w=${c.W}&h=${c.H}&x=${c.x}&y=${c.y}&cw=${c.cw}&ch=${c.ch}&d=${id}&v=${revision}`
   const [listo, setListo] = useState<Recorte | null>(null)
   return (listo && listo !== r ? [listo, r] : [r]).map((c) => (
     <img
