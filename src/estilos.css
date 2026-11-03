@@ -38,8 +38,10 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .editar .colores, .editar .grosores { display: flex; gap: 4px; flex: none; }
 .editar .grosores button { padding: 0 8px; }
 .editar .color { width: 28px; min-width: 28px; height: 28px; min-height: 28px; padding: 0; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #9fb3c8; }
+.editar button svg { display: block; width: 21px; height: 21px; margin: 0 auto; }
 .editar .color[aria-pressed='true'] { box-shadow: 0 0 0 2px #1565c0; }
 .editar .sin-guardar { flex: none; padding: 0 6px; color: #b71c1c; font-size: 13px; }
+.editar .pista { flex: none; padding: 0 6px; color: #1565c0; font-size: 13px; }
 
 .preview { position: absolute; pointer-events: none; }
 .preview-texto { position: absolute; background: rgba(21, 101, 192, 0.3); border: 1px solid rgba(21, 101, 192, 0.8); }
@@ -54,6 +56,8 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .numero { color: #888; font-size: 14px; }
 .fallo { position: absolute; z-index: 1; padding: 4px 8px; border-radius: 4px; background: #ffebee; color: #b71c1c; font-size: 14px; }
 .resaltado { position: absolute; z-index: 1; border-radius: 1px; background: rgba(255, 213, 0, 0.35); pointer-events: none; }
+.campo { position: absolute; z-index: 2; display: block; padding: 0 4px; overflow: hidden; border: 2px dashed #1565c0; border-radius: 2px; background: rgba(21, 101, 192, 0.12); color: #0d47a1; font: inherit; font-size: 12px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.campo.protegido { border-color: #777; background: rgba(0, 0, 0, 0.06); color: #666; cursor: default; }
 .resaltado.actual { background: rgba(255, 145, 0, 0.5); box-shadow: 0 0 0 1px rgba(230, 80, 0, 0.8); }
 
 .indice { flex: none; width: min(320px, 85vw); overflow: auto; padding: 8px 0; background: #fff; border-right: 1px solid #ddd; }
@@ -96,6 +100,15 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .tarjeta-aviso h2 { margin: 0; font-size: 18px; }
 .tarjeta-aviso p { margin: 0; font-size: 15px; line-height: 1.45; }
 .tarjeta-aviso label { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.tarjeta-aviso textarea { width: 100%; min-height: 90px; padding: 10px; border: 1px solid #9fb3c8; border-radius: 8px; background: #fff; color: #1a1a1a; font: inherit; font-size: 15px; resize: vertical; }
+.fila-botones { display: flex; justify-content: flex-end; gap: 8px; }
+.fila-botones button { min-height: 40px; padding: 0 14px; border: 1px solid #9fb3c8; border-radius: 8px; background: #fff; color: inherit; font: inherit; cursor: pointer; }
+.fila-botones .grande { border: 0; background: #1565c0; color: #fff; }
+.nota-ayuda { font-size: 13px; color: #666; }
+.pad { width: 100%; aspect-ratio: 3 / 1; border: 1px solid #9fb3c8; border-radius: 8px; background: #fff; touch-action: none; overflow: hidden; }
+.pad svg { display: block; width: 100%; height: 100%; }
+.sellos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.sellos button { min-height: 50px; border: 2px solid; border-radius: 8px; background: #fff; font: inherit; font-weight: 700; letter-spacing: 0.5px; cursor: pointer; }
 .tarjeta-aviso .grande { align-self: flex-end; }
 
 /* Modo noche: la página se invierte (fondo oscuro, letras claras) y se corrigen los colores de las fotos. */
@@ -123,3 +136,11 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .noche .editar .sin-guardar { color: #ff8a80; }
 .noche .aviso-ok { background: #1b5e20; color: #e8f5e9; }
 .noche .tarjeta-aviso { background: #1a1a1a; color: #eee; }
+.noche .tarjeta-aviso textarea { background: #2f2f2f; color: #eee; border-color: #555; }
+.noche .fila-botones button { background: #2f2f2f; border-color: #555; color: #eee; }
+.noche .fila-botones .grande { background: #1565c0; color: #fff; }
+.noche .nota-ayuda { color: #bbb; }
+.noche .sellos button { background: #2f2f2f; }
+.noche .editar .pista { color: #90caf9; }
+.noche .campo { border-color: #90caf9; background: rgba(144, 202, 249, 0.15); color: #e3f2fd; }
+.noche .campo.protegido { border-color: #666; background: rgba(255, 255, 255, 0.06); color: #aaa; }
