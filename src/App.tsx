@@ -40,7 +40,29 @@ type Busqueda = { texto: string; resultados: Coincidencia[]; escaneado: boolean;
 /** Punto de una página que debe quedar en el mismo lugar de la pantalla tras un zoom o un giro. */
 type Ancla = { i: number; fx: number; fy: number; vx: number; vy: number }
 type Rango = [number, number]
-type Herramienta = 'mover' | 'resaltar' | 'subrayar' | 'tachar' | 'lapiz'
+type Herramienta =
+  | 'mover'
+  | 'resaltar'
+  | 'subrayar'
+  | 'tachar'
+  | 'lapiz'
+  | 'nota'
+  | 'texto'
+  | 'firma'
+  | 'formulario'
+  | 'sello'
+type Campo = {
+  pagina: number
+  xref: number
+  tipo: string
+  nombre: string
+  valor: string
+  readonly: boolean
+  x: number
+  y: number
+  w: number
+  h: number
+}
 type Preview = {
   left: number
   top: number
@@ -65,6 +87,12 @@ const COLORES_LAPIZ: ReadonlyArray<readonly [string, string]> = [
   ['#d32f2f', 'Rojo'],
   ['#1565c0', 'Azul'],
   ['#2e7d32', 'Verde'],
+]
+const SELLOS: ReadonlyArray<readonly [string, string]> = [
+  ['APROBADO', '#2e7d32'],
+  ['RECIBIDO', '#1565c0'],
+  ['PAGADO', '#2e7d32'],
+  ['CONFIDENCIAL', '#c62828'],
 ]
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
 const rgb = (hex: string): [number, number, number] => {
@@ -147,6 +175,16 @@ export default function App() {
   const [nombreActual, setNombreActual] = useState('')
   const [exito, setExito] = useState('')
   const [guardando, setGuardando] = useState(false)
+  const [textoPedido, setTextoPedido] = useState<{ modo: 'nota' | 'texto'; n: number; x: number; y: number } | null>(null)
+  const [textoEntrada, setTextoEntrada] = useState('')
+  const [padAbierto, setPadAbierto] = useState(false)
+  const [padTrazos, setPadTrazos] = useState<[number, number][][]>([])
+  const [firmaTrazos, setFirmaTrazos] = useState<[number, number][][] | null>(null)
+  const [campos, setCampos] = useState<Campo[]>([])
+  const [selloAbierto, setSelloAbierto] = useState(false)
+  const [selloPendiente, setSelloPendiente] = useState<{ texto: string; rojo: number; verde: number; azul: number } | null>(
+    null,
+  )
   const [verBuscar, setVerBuscar] = useState(false)
   const [textoBuscar, setTextoBuscar] = useState('')
   const [busqueda, setBusqueda] = useState<Busqueda | null>(null)
@@ -158,10 +196,11 @@ export default function App() {
   const gesto = useRef<{
     n: number
     page: HTMLElement
-    modo: 'texto' | 'tinta'
+    modo: 'texto' | 'tinta' | 'tap'
     tipo: Herramienta
     puntos: [number, number][]
   } | null>(null)
+  const padActual = useRef<[number, number][] | null>(null)
   const avisoVisto = useRef(false)
   const sucioRef = useRef(sucio)
   const editandoRef = useRef(editando)
@@ -586,9 +625,133 @@ export default function App() {
     try {
       const hecho = await invoke<boolean>('deshacer')
       if (!hecho) return
+      const quedan = Math.max(0, hechas - 1)
+      setRevision((r) => r + 1)
+      setHechas(quedan)
+      setSucio(quedan > 0)
+    } catch (e) {
+      console.error(e)
+      setError(String(e))
+    }
+  }
+
+  const deshacerTodo = async () => {
+    if (!confirm('¿Quitar todos los cambios de esta sesión? Lo que ya guardaste no se toca.')) return
+    try {
+      const hecho = await invoke<boolean>('deshacer_todo')
+      if (!hecho) return
+      setRevision((r) => r + 1)
+      setHechas(0)
+      setSucio(false)
+    } catch (e) {
+      console.error(e)
+      setError(String(e))
+    }
+  }
+
+  const ponerTexto = async () => {
+    const p = textoPedido
+    const texto = textoEntrada.trim()
+    if (!p || !texto) return
+    try {
+      await invoke(p.modo === 'nota' ? 'anotar_nota' : 'anotar_caja', { pagina: p.n, x: p.x, y: p.y, contenido: texto })
+      setTextoPedido(null)
+      setTextoEntrada('')
       setRevision((r) => r + 1)
       setSucio(true)
-      setHechas((h) => Math.max(0, h - 1))
+      setHechas((h) => h + 1)
+    } catch (e) {
+      console.error(e)
+      setError(String(e))
+    }
+  }
+
+  const elegirSello = (texto: string, color: string) => {
+    const [rojo, verde, azul] = rgb(color)
+    setSelloPendiente({ texto, rojo, verde, azul })
+    setSelloAbierto(false)
+    setHerramienta('sello')
+  }
+
+  const colocarSello = async (n: number, fx: number, fy: number) => {
+    const s = selloPendiente
+    setSelloPendiente(null)
+    setHerramienta('mover')
+    if (!s) return
+    try {
+      await invoke('anotar_sello', { pagina: n, x: fx, y: fy, texto: s.texto, rojo: s.rojo, verde: s.verde, azul: s.azul })
+      setRevision((r) => r + 1)
+      setSucio(true)
+      setHechas((h) => h + 1)
+    } catch (e) {
+      console.error(e)
+      setError(String(e))
+    }
+  }
+
+  const abrirFormulario = async () => {
+    setHerramienta('formulario')
+    try {
+      const lista = await invoke<Campo[]>('campos')
+      setCampos(lista)
+      if (!lista.length) setExito('Este PDF no tiene formularios.')
+    } catch (e) {
+      console.error(e)
+      setError(String(e))
+    }
+  }
+
+  const tocarCampo = useCallback(async (c: Campo) => {
+    if (c.readonly) {
+      setError('Este campo está protegido y no se puede cambiar.')
+      return
+    }
+    let valor: string
+    if (/button|checkbox|radio/i.test(c.tipo)) {
+      valor = c.valor && c.valor !== 'Off' ? 'Off' : 'Yes'
+    } else {
+      const escrito = prompt(`Valor de «${c.nombre || 'campo'}»`, c.valor)
+      if (escrito === null) return
+      valor = escrito
+    }
+    try {
+      await invoke('poner_campo', { pagina: c.pagina, xref: c.xref, valor })
+      setCampos(await invoke<Campo[]>('campos'))
+      setRevision((r) => r + 1)
+      setSucio(true)
+      setHechas((h) => h + 1)
+    } catch (e) {
+      console.error(e)
+      setError(String(e))
+    }
+  }, [])
+
+  const abrirFirma = () => {
+    setPadTrazos([])
+    setPadAbierto(true)
+  }
+
+  const ponerFirma = () => {
+    if (!padTrazos.length) return
+    setFirmaTrazos(padTrazos.map((t) => t.map(([x, y]) => [x, y] as [number, number])))
+    setPadAbierto(false)
+    setPadTrazos([])
+    setHerramienta('firma')
+  }
+
+  const colocarFirma = async (n: number, fx: number, fy: number) => {
+    const trazos = firmaTrazos
+    setFirmaTrazos(null)
+    setHerramienta('mover')
+    if (!trazos) return
+    const ajustados = trazos.map((t) =>
+      t.map(([x, y]) => [clamp01(fx + (x - 0.5) * 0.3), clamp01(fy + (y - 0.5) * 0.1)] as [number, number]),
+    )
+    try {
+      await invoke('anotar_tinta', { pagina: n, rojo: 0, verde: 0, azul: 0, grosor: 2, trazos: ajustados })
+      setRevision((r) => r + 1)
+      setSucio(true)
+      setHechas((h) => h + 1)
     } catch (e) {
       console.error(e)
       setError(String(e))
@@ -619,6 +782,7 @@ export default function App() {
       setNombreActual(nombreDestino)
       setRecientes((lista) => guardarReciente(lista, { ruta: guardada, nombre: nombreDestino }))
       setSucio(false)
+      setHechas(0)
       setExito('Copia guardada')
     } catch (e) {
       console.error(e)
@@ -845,6 +1009,19 @@ export default function App() {
 
       {editando && doc && (
         <div className="editar">
+          <button onClick={deshacer} disabled={!hechas} aria-label="Deshacer" title="Deshacer">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 14 4 9l5-5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M4 9h9.5a5.5 5.5 0 0 1 0 11H11" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+            </svg>
+          </button>
+          <button onClick={deshacerTodo} disabled={!hechas} aria-label="Deshacer todo" title="Deshacer todo">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
+              <path d="M16.2 8.2a5.6 5.6 0 1 0 1.6 4.6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+              <path d="M16.5 4.8v3.6h-3.6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
           <button aria-pressed={herramienta === 'mover'} onClick={() => setHerramienta('mover')}>
             Mover
           </button>
@@ -860,19 +1037,38 @@ export default function App() {
           <button aria-pressed={herramienta === 'lapiz'} onClick={() => setHerramienta('lapiz')}>
             Lápiz
           </button>
-          <span className="colores">
-            {(herramienta === 'lapiz' ? COLORES_LAPIZ : COLORES_TEXTO).map(([c, n]) => (
-              <button
-                key={c}
-                className="color"
-                style={{ background: c }}
-                aria-label={n}
-                title={n}
-                aria-pressed={(herramienta === 'lapiz' ? colorLapiz : colorTexto) === c}
-                onClick={() => (herramienta === 'lapiz' ? setColorLapiz(c) : setColorTexto(c))}
-              />
-            ))}
-          </span>
+          <button aria-pressed={herramienta === 'nota'} onClick={() => setHerramienta('nota')}>
+            Nota
+          </button>
+          <button aria-pressed={herramienta === 'texto'} onClick={() => setHerramienta('texto')}>
+            Texto
+          </button>
+          <button aria-pressed={herramienta === 'firma'} onClick={abrirFirma}>
+            Firma
+          </button>
+          <button aria-pressed={herramienta === 'formulario'} onClick={abrirFormulario}>
+            Formulario
+          </button>
+          <button aria-pressed={herramienta === 'sello'} onClick={() => setSelloAbierto(true)}>
+            Sello
+          </button>
+          {(herramienta === 'lapiz' || herramienta === 'resaltar' || herramienta === 'subrayar' || herramienta === 'tachar') && (
+            <span className="colores">
+              {(herramienta === 'lapiz' ? COLORES_LAPIZ : COLORES_TEXTO).map(([c, n]) => (
+                <button
+                  key={c}
+                  className="color"
+                  style={{ background: c }}
+                  aria-label={n}
+                  title={n}
+                  aria-pressed={(herramienta === 'lapiz' ? colorLapiz : colorTexto) === c}
+                  onClick={() => (herramienta === 'lapiz' ? setColorLapiz(c) : setColorTexto(c))}
+                />
+              ))}
+            </span>
+          )}
+          {herramienta === 'firma' && <span className="pista">Toca la página donde quieres la firma</span>}
+          {herramienta === 'sello' && <span className="pista">Toca la página donde quieres el sello</span>}
           {herramienta === 'lapiz' && (
             <span className="grosores">
               {[1.5, 3, 6].map((g) => (
@@ -882,9 +1078,6 @@ export default function App() {
               ))}
             </span>
           )}
-          <button onClick={deshacer} disabled={!hechas}>
-            Deshacer
-          </button>
           <button onClick={guardarCopia} disabled={guardando}>
             {guardando ? 'Guardando…' : 'Guardar copia'}
           </button>
@@ -949,7 +1142,7 @@ export default function App() {
           onClick={() => {
             if (verIndice) setVerIndice(false)
           }}
-          style={editando && herramienta !== 'mover' ? { touchAction: 'none' } : undefined}
+          style={editando && herramienta !== 'mover' && herramienta !== 'formulario' ? { touchAction: 'none' } : undefined}
           onScroll={() => {
             medir()
             clearTimeout(relojVecinas.current)
@@ -960,7 +1153,7 @@ export default function App() {
             className="contenido"
             ref={contenido}
             onPointerDown={(e) => {
-              if (!editando || herramienta === 'mover' || !doc) return
+              if (!editando || herramienta === 'mover' || herramienta === 'formulario' || !doc) return
               const page = (e.target as HTMLElement).closest('.pagina') as HTMLElement | null
               if (!page) return
               const n = Number(page.dataset.n)
@@ -970,20 +1163,27 @@ export default function App() {
               const r = page.getBoundingClientRect()
               const fx = clamp01((e.clientX - r.left) / r.width)
               const fy = clamp01((e.clientY - r.top) / r.height)
-              const modo = herramienta === 'lapiz' ? 'tinta' : 'texto'
+              const modo =
+                herramienta === 'lapiz'
+                  ? 'tinta'
+                  : herramienta === 'nota' || herramienta === 'texto' || herramienta === 'firma' || herramienta === 'sello'
+                    ? 'tap'
+                    : 'texto'
               gesto.current = { n, page, modo, tipo: herramienta, puntos: [[fx, fy]] }
-              setPreview({
-                left: page.offsetLeft,
-                top: page.offsetTop,
-                width: page.offsetWidth,
-                height: page.offsetHeight,
-                modo,
-                x0: fx,
-                y0: fy,
-                x1: fx,
-                y1: fy,
-                puntos: [[fx, fy]],
-              })
+              if (modo !== 'tap') {
+                setPreview({
+                  left: page.offsetLeft,
+                  top: page.offsetTop,
+                  width: page.offsetWidth,
+                  height: page.offsetHeight,
+                  modo,
+                  x0: fx,
+                  y0: fy,
+                  x1: fx,
+                  y1: fy,
+                  puntos: [[fx, fy]],
+                })
+              }
             }}
             onPointerMove={(e) => {
               const g = gesto.current
@@ -1017,10 +1217,21 @@ export default function App() {
                 console.error(err)
                 setError(String(err))
               }
+              if (g.modo === 'tap') {
+                if (g.tipo === 'firma') {
+                  colocarFirma(g.n, fx, fy)
+                } else if (g.tipo === 'sello') {
+                  colocarSello(g.n, fx, fy)
+                } else {
+                  setTextoPedido({ modo: g.tipo === 'nota' ? 'nota' : 'texto', n: g.n, x: g.puntos[0][0], y: g.puntos[0][1] })
+                  setTextoEntrada('')
+                }
+                return
+              }
               if (g.modo === 'tinta') {
                 if (g.puntos.length < 2) return
                 const [rojo, verde, azul] = rgb(colorLapiz)
-                invoke('anotar_tinta', { pagina: g.n, rojo, verde, azul, grosor, puntos: g.puntos }).then(listo).catch(fallo)
+                invoke('anotar_tinta', { pagina: g.n, rojo, verde, azul, grosor, trazos: [g.puntos] }).then(listo).catch(fallo)
               } else {
                 const [rojo, verde, azul] = rgb(colorTexto)
                 invoke('anotar_texto', {
@@ -1056,6 +1267,8 @@ export default function App() {
                 busqueda={busqueda}
                 coincidencia={coincidencia}
                 revision={revision}
+                campos={herramienta === 'formulario' ? campos : undefined}
+                onCampo={tocarCampo}
               />
             )}
             {preview && (
@@ -1146,9 +1359,9 @@ export default function App() {
           <div className="tarjeta-aviso">
             <h2 id="titulo-edicion">Edición básica de PDF</h2>
             <p>
-              Puedes resaltar, subrayar, tachar y dibujar a mano. No se puede cambiar el texto original, las imágenes ni el
-              diseño de la página: el PDF está hecho para leerse, no para editarse. Al guardar se crea una copia; el archivo
-              original no se toca.
+              Puedes resaltar, subrayar, tachar, dibujar a mano, poner notas y cuadros de texto, firmar dibujando, rellenar
+              formularios y poner sellos. No se puede cambiar el texto original, las imágenes ni el diseño de la página: el
+              PDF está hecho para leerse, no para editarse. Al guardar se crea una copia; el archivo original no se toca.
             </p>
             <p>Si sales sin guardar, se pierden los cambios.</p>
             {!ayudaManual && (
@@ -1160,6 +1373,114 @@ export default function App() {
             <button className="grande" onClick={cerrarAviso}>
               Entendido
             </button>
+          </div>
+        </div>
+      )}
+
+      {textoPedido && (
+        <div className="fondo-aviso" role="dialog" aria-modal="true" aria-labelledby="titulo-texto">
+          <div className="tarjeta-aviso">
+            <h2 id="titulo-texto">{textoPedido.modo === 'nota' ? 'Nueva nota' : 'Nuevo texto'}</h2>
+            <textarea
+              autoFocus
+              rows={4}
+              value={textoEntrada}
+              onChange={(e) => setTextoEntrada(e.currentTarget.value)}
+              placeholder={textoPedido.modo === 'nota' ? 'Escribe la nota' : 'Escribe el texto'}
+            />
+            <div className="fila-botones">
+              <button onClick={() => setTextoPedido(null)}>Cancelar</button>
+              <button className="grande" onClick={ponerTexto} disabled={!textoEntrada.trim()}>
+                {textoPedido.modo === 'nota' ? 'Poner nota' : 'Poner texto'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {padAbierto && (
+        <div className="fondo-aviso" role="dialog" aria-modal="true" aria-labelledby="titulo-firma">
+          <div className="tarjeta-aviso">
+            <h2 id="titulo-firma">Firma con el dedo</h2>
+            <div
+              className="pad"
+              onPointerDown={(e) => {
+                e.preventDefault()
+                e.currentTarget.setPointerCapture(e.pointerId)
+                const r = e.currentTarget.getBoundingClientRect()
+                const x = clamp01((e.clientX - r.left) / r.width)
+                const y = clamp01((e.clientY - r.top) / r.height)
+                padActual.current = [[x, y]]
+                setPadTrazos((t) => [...t, [[x, y]]])
+              }}
+              onPointerMove={(e) => {
+                const actual = padActual.current
+                if (!actual) return
+                e.preventDefault()
+                const r = e.currentTarget.getBoundingClientRect()
+                actual.push([clamp01((e.clientX - r.left) / r.width), clamp01((e.clientY - r.top) / r.height)])
+                const copia = [...actual]
+                setPadTrazos((t) => {
+                  const nuevo = [...t]
+                  nuevo[nuevo.length - 1] = copia
+                  return nuevo
+                })
+              }}
+              onPointerUp={() => {
+                padActual.current = null
+              }}
+              onPointerCancel={() => {
+                padActual.current = null
+              }}
+            >
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+                {padTrazos.map((t, i) => (
+                  <polyline
+                    key={i}
+                    points={t.map(([x, y]) => `${x * 100},${y * 100}`).join(' ')}
+                    fill="none"
+                    stroke="#000"
+                    strokeWidth="1.5"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ))}
+              </svg>
+            </div>
+            <p className="nota-ayuda">Después de ponerla, toca la página donde quieres la firma.</p>
+            <div className="fila-botones">
+              <button onClick={() => setPadTrazos([])} disabled={!padTrazos.length}>
+                Borrar
+              </button>
+              <button
+                onClick={() => {
+                  setPadAbierto(false)
+                  setPadTrazos([])
+                }}
+              >
+                Cancelar
+              </button>
+              <button className="grande" onClick={ponerFirma} disabled={!padTrazos.length}>
+                Poner firma
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selloAbierto && (
+        <div className="fondo-aviso" role="dialog" aria-modal="true" aria-labelledby="titulo-sello">
+          <div className="tarjeta-aviso">
+            <h2 id="titulo-sello">Elige el sello</h2>
+            <div className="sellos">
+              {SELLOS.map(([texto, color]) => (
+                <button key={texto} style={{ color, borderColor: color }} onClick={() => elegirSello(texto, color)}>
+                  {texto}
+                </button>
+              ))}
+            </div>
+            <div className="fila-botones">
+              <button onClick={() => setSelloAbierto(false)}>Cancelar</button>
+            </div>
           </div>
         </div>
       )}
@@ -1183,6 +1504,8 @@ const Paginas = memo(function Paginas({
   busqueda,
   coincidencia,
   revision,
+  campos,
+  onCampo,
 }: {
   doc: Doc
   ancho: number
@@ -1194,6 +1517,8 @@ const Paginas = memo(function Paginas({
   busqueda: Busqueda | null
   coincidencia: number
   revision: number
+  campos?: Campo[]
+  onCampo: (c: Campo) => void
 }) {
   // Alto/ancho real de las páginas ya pintadas que no miden como la primera.
   const [prop, setProp] = useState<Record<number, number>>({})
@@ -1218,6 +1543,15 @@ const Paginas = memo(function Paginas({
     })
     return m
   }, [busqueda])
+  const porCampo = useMemo(() => {
+    const m = new Map<number, Campo[]>()
+    campos?.forEach((c) => {
+      const lista = m.get(c.pagina)
+      if (lista) lista.push(c)
+      else m.set(c.pagina, [c])
+    })
+    return m
+  }, [campos])
   return Array.from({ length: doc.info.paginas }, (_, n) => {
     // Solo se pintan los resaltados de lo que se está viendo: una palabra común no llena la pantalla de capas.
     const resaltados = dentro(visibles, n) || dentro(cercanas, n) ? porPagina.get(n) : undefined
@@ -1235,6 +1569,8 @@ const Paginas = memo(function Paginas({
         actual={resaltados?.some((x) => x.i === coincidencia) ? coincidencia : -1}
         medida={medida}
         revision={revision}
+        campos={porCampo.get(n)}
+        onCampo={onCampo}
       />
     )
   })
@@ -1252,6 +1588,8 @@ const Pagina = memo(function Pagina({
   actual,
   medida,
   revision,
+  campos,
+  onCampo,
 }: {
   n: number
   id: number
@@ -1264,6 +1602,8 @@ const Pagina = memo(function Pagina({
   actual: number
   medida: (n: number, real: number) => void
   revision: number
+  campos?: Campo[]
+  onCampo: (c: Campo) => void
 }) {
   const url = (w: number) => `${convertFileSrc(String(n), 'pagina')}?w=${w}&d=${id}&v=${revision}`
   return (
@@ -1291,6 +1631,22 @@ const Pagina = memo(function Pagina({
             height: `${c.h * 100}%`,
           }}
         />
+      ))}
+      {campos?.map((c) => (
+        <button
+          key={c.xref}
+          className={c.readonly ? 'campo protegido' : 'campo'}
+          style={{
+            left: `${c.x * 100}%`,
+            top: `${c.y * 100}%`,
+            width: `${c.w * 100}%`,
+            height: `${c.h * 100}%`,
+          }}
+          title={c.nombre || 'Campo del formulario'}
+          onClick={() => onCampo(c)}
+        >
+          {c.valor}
+        </button>
       ))}
     </div>
   )

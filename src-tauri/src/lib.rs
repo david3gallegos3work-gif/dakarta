@@ -3,7 +3,7 @@ mod motor;
 
 use std::sync::Mutex;
 
-use motor::{Busqueda, Info, Motor};
+use motor::{Busqueda, Campo, Info, Motor};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_opener::OpenerExt;
@@ -61,14 +61,53 @@ async fn anotar_tinta(
     verde: f32,
     azul: f32,
     grosor: f32,
-    puntos: Vec<(f32, f32)>,
+    trazos: Vec<Vec<(f32, f32)>>,
 ) -> Result<(), String> {
-    motor.anotar_tinta(pagina, (rojo, verde, azul), grosor, puntos)
+    motor.anotar_tinta(pagina, (rojo, verde, azul), grosor, trazos)
+}
+
+#[tauri::command]
+async fn anotar_nota(motor: State<'_, Motor>, pagina: i32, x: f32, y: f32, contenido: String) -> Result<(), String> {
+    motor.anotar_nota(pagina, x, y, contenido)
+}
+
+#[tauri::command]
+async fn anotar_caja(motor: State<'_, Motor>, pagina: i32, x: f32, y: f32, contenido: String) -> Result<(), String> {
+    motor.anotar_caja(pagina, x, y, contenido)
+}
+
+#[tauri::command]
+async fn anotar_sello(
+    motor: State<'_, Motor>,
+    pagina: i32,
+    x: f32,
+    y: f32,
+    texto: String,
+    rojo: f32,
+    verde: f32,
+    azul: f32,
+) -> Result<(), String> {
+    motor.anotar_sello(pagina, x, y, texto, (rojo, verde, azul))
+}
+
+#[tauri::command]
+async fn campos(motor: State<'_, Motor>) -> Result<Vec<Campo>, String> {
+    motor.campos()
+}
+
+#[tauri::command]
+async fn poner_campo(motor: State<'_, Motor>, pagina: i32, xref: i32, valor: String) -> Result<(), String> {
+    motor.poner_campo(pagina, xref, valor)
 }
 
 #[tauri::command]
 async fn deshacer(motor: State<'_, Motor>) -> Result<bool, String> {
     motor.deshacer()
+}
+
+#[tauri::command]
+async fn deshacer_todo(motor: State<'_, Motor>) -> Result<bool, String> {
+    motor.deshacer_todo()
 }
 
 /// Android: deja la copia editada en la caché; la app la copia al destino elegido por el usuario.
@@ -173,7 +212,13 @@ pub fn run() {
     mostrar_archivo,
     anotar_texto,
     anotar_tinta,
+    anotar_nota,
+    anotar_caja,
+    anotar_sello,
+    campos,
+    poner_campo,
     deshacer,
+    deshacer_todo,
     guardar_en_cache,
     guardar_copia
 ])

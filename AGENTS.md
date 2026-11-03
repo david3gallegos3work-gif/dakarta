@@ -118,7 +118,7 @@ La idea es **limitar de verdad**, no solo avisar. El usuario no debe encontrar b
 ### 2. La barra de herramientas solo muestra lo permitido
 
 - **DOCX:** negrita, cursiva, subrayado, títulos, viñetas, listas numeradas, deshacer/rehacer. Nada más.
-- **PDF:** resaltar, subrayar, tachar, dibujar, nota, cuadro de texto, firma dibujada, formulario.
+- **PDF:** resaltar, subrayar, tachar, dibujar, nota, cuadro de texto, firma dibujada, formulario y sello.
 - Botón **ⓘ «¿Qué puedo editar?»** con la lista de lo que se puede y lo que no.
 
 ### 3. Bloqueo con explicación al intentar algo no permitido

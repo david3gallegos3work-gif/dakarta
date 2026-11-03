@@ -62,6 +62,21 @@ struct Entrada {
     hijos: Vec<Entrada>,
 }
 
+#[derive(Serialize)]
+pub struct Campo {
+    pagina: i32,
+    xref: i32,
+    tipo: String,
+    nombre: String,
+    valor: String,
+    readonly: bool,
+    /// Caja del campo, en fracción de la página (0 a 1).
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+}
+
 /// Ancho de las miniaturas que se ven mientras se desplaza (el mismo valor en src/zoom.ts).
 const MINIATURA: u32 = 384;
 const TOPE_CACHE: usize = 64 * 1024 * 1024;
@@ -93,6 +108,12 @@ enum TipoTexto {
     Tachar,
 }
 
+/// Lo que se puede deshacer en esta sesión.
+enum Hecho {
+    Anotacion { n: i32, xref: i32 },
+    Campo { n: i32, xref: i32, anterior: String },
+}
+
 enum Pedido {
     Abrir { ruta: String, archivo: Option<File>, resp: Sender<Result<Info, String>> },
     Buscar { texto: String, resp: Sender<Result<Busqueda, String>> },
@@ -109,10 +130,35 @@ enum Pedido {
         n: i32,
         color: (f32, f32, f32),
         grosor: f32,
-        puntos: Vec<(f32, f32)>,
+        trazos: Vec<Vec<(f32, f32)>>,
+        resp: Sender<Result<(), String>>,
+    },
+    Nota {
+        n: i32,
+        x: f32,
+        y: f32,
+        contenido: String,
+        resp: Sender<Result<(), String>>,
+    },
+    Caja {
+        n: i32,
+        x: f32,
+        y: f32,
+        contenido: String,
+        resp: Sender<Result<(), String>>,
+    },
+    Sello {
+        n: i32,
+        x: f32,
+        y: f32,
+        texto: String,
+        color: (f32, f32, f32),
         resp: Sender<Result<(), String>>,
     },
     Deshacer { resp: Sender<Result<bool, String>> },
+    DeshacerTodo { resp: Sender<Result<bool, String>> },
+    Campos { resp: Sender<Result<Vec<Campo>, String>> },
+    Campo { n: i32, xref: i32, valor: String, resp: Sender<Result<(), String>> },
     Guardar { destino: String, resp: Sender<Result<(), String>> },
 }
 
@@ -125,8 +171,8 @@ impl Motor {
         std::thread::spawn(move || {
             // En Android el archivo viaja con el documento: si se cerrara, MuPDF perdería el acceso.
             let mut abierto: Option<(PdfDocument, Option<File>)> = None;
-            // Anotaciones creadas en esta sesión (página, xref), para deshacer.
-            let mut hechas: Vec<(i32, i32)> = Vec::new();
+            // Anotaciones y campos cambiados en esta sesión, para deshacer.
+            let mut hechas: Vec<Hecho> = Vec::new();
             let mut pendientes: Vec<PedidoPagina> = Vec::new();
             let mut cache = Cache::nuevo(TOPE_CACHE);
             loop {
@@ -165,17 +211,64 @@ impl Motor {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
                                 Some((doc, _)) => anotar_texto(doc, n, tipo, color, a, b).map(|xref| {
-                                    hechas.push((n, xref));
+                                    hechas.push(Hecho::Anotacion { n, xref });
                                     cache.vaciar();
                                 }),
                             };
                             let _ = resp.send(r);
                         }
-                        Pedido::Tinta { n, color, grosor, puntos, resp } => {
+                        Pedido::Tinta { n, color, grosor, trazos, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => anotar_tinta(doc, n, color, grosor, &puntos).map(|xref| {
-                                    hechas.push((n, xref));
+                                Some((doc, _)) => anotar_tinta(doc, n, color, grosor, &trazos).map(|xref| {
+                                    hechas.push(Hecho::Anotacion { n, xref });
+                                    cache.vaciar();
+                                }),
+                            };
+                            let _ = resp.send(r);
+                        }
+                        Pedido::Nota { n, x, y, contenido, resp } => {
+                            let r = match &mut abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => anotar_nota(doc, n, x, y, &contenido).map(|xref| {
+                                    hechas.push(Hecho::Anotacion { n, xref });
+                                    cache.vaciar();
+                                }),
+                            };
+                            let _ = resp.send(r);
+                        }
+                        Pedido::Caja { n, x, y, contenido, resp } => {
+                            let r = match &mut abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => anotar_caja(doc, n, x, y, &contenido).map(|xref| {
+                                    hechas.push(Hecho::Anotacion { n, xref });
+                                    cache.vaciar();
+                                }),
+                            };
+                            let _ = resp.send(r);
+                        }
+                        Pedido::Sello { n, x, y, texto, color, resp } => {
+                            let r = match &mut abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => anotar_sello(doc, n, x, y, &texto, color).map(|xref| {
+                                    hechas.push(Hecho::Anotacion { n, xref });
+                                    cache.vaciar();
+                                }),
+                            };
+                            let _ = resp.send(r);
+                        }
+                        Pedido::Campos { resp } => {
+                            let r = match &abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => campos_doc(doc),
+                            };
+                            let _ = resp.send(r);
+                        }
+                        Pedido::Campo { n, xref, valor, resp } => {
+                            let r = match &mut abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => fijar_campo(doc, n, xref, &valor).map(|anterior| {
+                                    hechas.push(Hecho::Campo { n, xref, anterior });
                                     cache.vaciar();
                                 }),
                             };
@@ -193,10 +286,23 @@ impl Motor {
                             };
                             let _ = resp.send(r);
                         }
+                        Pedido::DeshacerTodo { resp } => {
+                            let r = match &mut abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => deshacer_todo(doc, &mut hechas).map(|hecho| {
+                                    if hecho {
+                                        cache.vaciar();
+                                    }
+                                    hecho
+                                }),
+                            };
+                            let _ = resp.send(r);
+                        }
                         Pedido::Guardar { destino, resp } => {
                             let r = match &abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => guardar_doc(doc, &destino),
+                                // Lo guardado queda como punto de partida: ya no se deshace.
+                                Some((doc, _)) => guardar_doc(doc, &destino).map(|()| hechas.clear()),
                             };
                             let _ = resp.send(r);
                         }
@@ -263,15 +369,51 @@ impl Motor {
         rx.recv().map_err(texto)?
     }
 
-    pub fn anotar_tinta(&self, n: i32, color: (f32, f32, f32), grosor: f32, puntos: Vec<(f32, f32)>) -> Result<(), String> {
+    pub fn anotar_tinta(&self, n: i32, color: (f32, f32, f32), grosor: f32, trazos: Vec<Vec<(f32, f32)>>) -> Result<(), String> {
         let (tx, rx) = mpsc::channel();
-        self.0.send(Pedido::Tinta { n, color, grosor, puntos, resp: tx }).map_err(texto)?;
+        self.0.send(Pedido::Tinta { n, color, grosor, trazos, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
+    pub fn anotar_nota(&self, n: i32, x: f32, y: f32, contenido: String) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Nota { n, x, y, contenido, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
+    pub fn anotar_caja(&self, n: i32, x: f32, y: f32, contenido: String) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Caja { n, x, y, contenido, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
+    pub fn anotar_sello(&self, n: i32, x: f32, y: f32, texto: String, color: (f32, f32, f32)) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Sello { n, x, y, texto, color, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
+    pub fn campos(&self) -> Result<Vec<Campo>, String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Campos { resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
+    pub fn poner_campo(&self, n: i32, xref: i32, valor: String) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Campo { n, xref, valor, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
     pub fn deshacer(&self) -> Result<bool, String> {
         let (tx, rx) = mpsc::channel();
         self.0.send(Pedido::Deshacer { resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
+    pub fn deshacer_todo(&self) -> Result<bool, String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::DeshacerTodo { resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
@@ -448,48 +590,228 @@ fn anotar_texto(
     annot.xref().map_err(texto)
 }
 
-/// Dibuja un trazo a mano (puntos en fracción de la página).
+/// Dibuja trazos a mano (puntos en fracción de la página); una firma puede tener varios.
 fn anotar_tinta(
     doc: &mut PdfDocument,
     n: i32,
     color: (f32, f32, f32),
     grosor: f32,
-    puntos: &[(f32, f32)],
+    trazos: &[Vec<(f32, f32)>],
 ) -> Result<i32, String> {
-    if puntos.len() < 2 {
-        return Err("El trazo es muy corto.".into());
-    }
     let pagina = doc.load_page(n).map_err(texto)?;
     let caja = pagina.bounds().map_err(texto)?;
     if caja.width() <= 0.0 || caja.height() <= 0.0 {
         return Err("La página está vacía.".into());
     }
-    let trazo: Vec<Point> = puntos
+    let trazos: Vec<Vec<Point>> = trazos
         .iter()
-        .map(|(fx, fy)| Point {
-            x: caja.x0 + fx.clamp(0.0, 1.0) * caja.width(),
-            y: caja.y0 + fy.clamp(0.0, 1.0) * caja.height(),
+        .filter(|t| t.len() >= 2)
+        .map(|t| {
+            t.iter()
+                .map(|(fx, fy)| Point {
+                    x: caja.x0 + fx.clamp(0.0, 1.0) * caja.width(),
+                    y: caja.y0 + fy.clamp(0.0, 1.0) * caja.height(),
+                })
+                .collect()
         })
         .collect();
+    if trazos.is_empty() {
+        return Err("El trazo es muy corto.".into());
+    }
     let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
-    let mut annot = pdf.add_ink_annotation(std::iter::once(trazo)).map_err(texto)?;
+    let mut annot = pdf.add_ink_annotation(trazos).map_err(texto)?;
     annot.set_color(anotacion_color(color)).map_err(texto)?;
     annot.set_border_width(grosor.clamp(0.5, 20.0)).map_err(texto)?;
     annot.update().map_err(texto)?;
     annot.xref().map_err(texto)
 }
 
-/// Borra la última anotación creada en esta sesión.
-fn deshacer(doc: &mut PdfDocument, hechas: &mut Vec<(i32, i32)>) -> Result<bool, String> {
-    let Some((n, xref)) = hechas.pop() else {
-        return Ok(false);
-    };
+/// Nota con el icono en la página; el texto se lee al abrir la nota en cualquier lector.
+fn anotar_nota(doc: &mut PdfDocument, n: i32, x: f32, y: f32, contenido: &str) -> Result<i32, String> {
+    let contenido = contenido.trim();
+    if contenido.is_empty() {
+        return Err("Escribe la nota.".into());
+    }
+    let pagina = doc.load_page(n).map_err(texto)?;
+    let caja = pagina.bounds().map_err(texto)?;
+    if caja.width() <= 0.0 || caja.height() <= 0.0 {
+        return Err("La página está vacía.".into());
+    }
+    let lado = 24.0_f32.min(caja.width() * 0.1);
+    let x0 = (caja.x0 + x.clamp(0.0, 1.0) * caja.width()).min(caja.x1 - lado).max(caja.x0);
+    let y0 = (caja.y0 + y.clamp(0.0, 1.0) * caja.height()).min(caja.y1 - lado).max(caja.y0);
+    let rect = Rect::new(x0, y0, x0 + lado, y0 + lado);
+    let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
+    let mut annot = pdf.add_text_annotation(rect, contenido).map_err(texto)?;
+    annot.set_color(AnnotationColor::Rgb { red: 1.0, green: 0.8, blue: 0.0 }).map_err(texto)?;
+    annot.update().map_err(texto)?;
+    annot.xref().map_err(texto)
+}
+
+/// Cuadro de texto: se abre desde el toque hacia la derecha y abajo, con fondo claro.
+fn anotar_caja(doc: &mut PdfDocument, n: i32, x: f32, y: f32, contenido: &str) -> Result<i32, String> {
+    let contenido = contenido.trim();
+    if contenido.is_empty() {
+        return Err("Escribe el texto.".into());
+    }
+    let pagina = doc.load_page(n).map_err(texto)?;
+    let caja = pagina.bounds().map_err(texto)?;
+    if caja.width() <= 0.0 || caja.height() <= 0.0 {
+        return Err("La página está vacía.".into());
+    }
+    let lineas = envolver(contenido, 38);
+    let texto = lineas.join("\n");
+    let alto = (lineas.len() as f32 * 15.0 + 8.0).min(caja.height());
+    let ancho = (caja.width() * 0.6).min(260.0);
+    let x0 = (caja.x0 + x.clamp(0.0, 1.0) * caja.width()).min(caja.x1 - ancho).max(caja.x0);
+    let y0 = (caja.y0 + y.clamp(0.0, 1.0) * caja.height()).min(caja.y1 - alto).max(caja.y0);
+    let rect = Rect::new(x0, y0, x0 + ancho, y0 + alto);
+    let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
+    let mut annot = pdf.add_free_text_annotation(rect, &texto).map_err(texto)?;
+    annot
+        .set_default_appearance("Helv", 12.0, Some(AnnotationColor::Rgb { red: 0.0, green: 0.0, blue: 0.0 }))
+        .map_err(texto)?;
+    annot.set_color(AnnotationColor::Rgb { red: 0.55, green: 0.55, blue: 0.55 }).map_err(texto)?;
+    annot.set_interior_color(AnnotationColor::Rgb { red: 1.0, green: 0.98, blue: 0.82 }).map_err(texto)?;
+    annot.set_border_width(0.8).map_err(texto)?;
+    annot.update().map_err(texto)?;
+    annot.xref().map_err(texto)
+}
+
+/// Sello de texto grande, centrado en el toque (un cuadro de texto con borde y fondo blanco).
+fn anotar_sello(
+    doc: &mut PdfDocument,
+    n: i32,
+    x: f32,
+    y: f32,
+    texto: &str,
+    color: (f32, f32, f32),
+) -> Result<i32, String> {
+    let pagina = doc.load_page(n).map_err(texto)?;
+    let caja = pagina.bounds().map_err(texto)?;
+    if caja.width() <= 0.0 || caja.height() <= 0.0 {
+        return Err("La página está vacía.".into());
+    }
+    let ancho = (caja.width() * 0.4).min(170.0);
+    let alto = 46.0_f32.min(caja.height() * 0.1);
+    let x0 = (caja.x0 + x.clamp(0.0, 1.0) * caja.width() - ancho / 2.0).clamp(caja.x0, caja.x1 - ancho);
+    let y0 = (caja.y0 + y.clamp(0.0, 1.0) * caja.height() - alto / 2.0).clamp(caja.y0, caja.y1 - alto);
+    let rect = Rect::new(x0, y0, x0 + ancho, y0 + alto);
+    let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
+    let mut annot = pdf.add_free_text_annotation(rect, texto).map_err(texto)?;
+    annot
+        .set_default_appearance("Helv", 18.0, Some(anotacion_color(color)))
+        .map_err(texto)?;
+    annot.set_color(anotacion_color(color)).map_err(texto)?;
+    annot.set_interior_color(AnnotationColor::Rgb { red: 1.0, green: 1.0, blue: 1.0 }).map_err(texto)?;
+    annot.set_border_width(2.0).map_err(texto)?;
+    annot.update().map_err(texto)?;
+    annot.xref().map_err(texto)
+}
+
+fn envolver(texto: &str, ancho: usize) -> Vec<String> {
+    let mut lineas = Vec::new();
+    let mut actual = String::new();
+    for palabra in texto.split_whitespace() {
+        if !actual.is_empty() && actual.len() + 1 + palabra.len() > ancho {
+            lineas.push(actual);
+            actual = String::new();
+        }
+        if !actual.is_empty() {
+            actual.push(' ');
+        }
+        actual.push_str(palabra);
+    }
+    if !actual.is_empty() {
+        lineas.push(actual);
+    }
+    lineas
+}
+
+fn borrar_anotacion(doc: &mut PdfDocument, n: i32, xref: i32) -> Result<(), String> {
     let mut pagina = doc.load_pdf_page(n).map_err(texto)?;
     let encontrada = pagina.annotations().find(|a| a.xref().ok() == Some(xref));
     if let Some(a) = encontrada {
         pagina.delete_annotation(a).map_err(texto)?;
     }
+    Ok(())
+}
+
+/// Deshace el último cambio de esta sesión.
+fn deshacer(doc: &mut PdfDocument, hechas: &mut Vec<Hecho>) -> Result<bool, String> {
+    let Some(hecho) = hechas.pop() else {
+        return Ok(false);
+    };
+    match hecho {
+        Hecho::Anotacion { n, xref } => borrar_anotacion(doc, n, xref)?,
+        Hecho::Campo { n, xref, anterior } => {
+            fijar_campo(doc, n, xref, &anterior)?;
+        }
+    }
     Ok(true)
+}
+
+/// Vuelve al estado de la última vez que se guardó.
+fn deshacer_todo(doc: &mut PdfDocument, hechas: &mut Vec<Hecho>) -> Result<bool, String> {
+    if hechas.is_empty() {
+        return Ok(false);
+    }
+    for hecho in hechas.iter().rev() {
+        match hecho {
+            Hecho::Anotacion { n, xref } => borrar_anotacion(doc, *n, *xref)?,
+            Hecho::Campo { n, xref, anterior } => {
+                fijar_campo(doc, *n, *xref, anterior)?;
+            }
+        }
+    }
+    hechas.clear();
+    Ok(true)
+}
+
+/// Todos los campos de formulario del documento, con su caja en fracción de la página.
+fn campos_doc(doc: &PdfDocument) -> Result<Vec<Campo>, String> {
+    let paginas = doc.page_count().map_err(texto)?;
+    let mut campos = Vec::new();
+    for n in 0..paginas {
+        let pagina = doc.load_page(n).map_err(texto)?;
+        let caja = pagina.bounds().map_err(texto)?;
+        if caja.width() <= 0.0 || caja.height() <= 0.0 {
+            continue;
+        }
+        let pdf = doc.load_pdf_page(n).map_err(texto)?;
+        for w in pdf.widgets() {
+            let r = w.annotation().rect().map_err(texto)?;
+            campos.push(Campo {
+                pagina: n,
+                xref: w.xref().map_err(texto)?,
+                tipo: format!("{:?}", w.r#type().map_err(texto)?),
+                nombre: w.name().map_err(texto)?.unwrap_or_default(),
+                valor: w.value().map_err(texto)?.unwrap_or_default(),
+                readonly: w.is_readonly().map_err(texto)?,
+                x: ((r.x0 - caja.x0) / caja.width()).clamp(0.0, 1.0),
+                y: ((r.y0 - caja.y0) / caja.height()).clamp(0.0, 1.0),
+                w: ((r.x1 - r.x0) / caja.width()).clamp(0.0, 1.0),
+                h: ((r.y1 - r.y0) / caja.height()).clamp(0.0, 1.0),
+            });
+        }
+    }
+    Ok(campos)
+}
+
+/// Cambia el valor de un campo y devuelve el valor que tenía antes.
+fn fijar_campo(doc: &mut PdfDocument, n: i32, xref: i32, valor: &str) -> Result<String, String> {
+    let pagina = doc.load_pdf_page(n).map_err(texto)?;
+    let mut widget = pagina
+        .load_widget(xref)
+        .map_err(texto)?
+        .ok_or("No se encontró el campo.".to_string())?;
+    if widget.is_readonly().map_err(texto)? {
+        return Err("Este campo está protegido y no se puede cambiar.".into());
+    }
+    let anterior = widget.value().map_err(texto)?.unwrap_or_default();
+    widget.set_value(doc, valor, true).map_err(texto)?;
+    widget.update().map_err(texto)?;
+    Ok(anterior)
 }
 
 fn guardar_doc(doc: &PdfDocument, destino: &str) -> Result<(), String> {
