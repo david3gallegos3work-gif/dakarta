@@ -29,6 +29,15 @@ impl Cache {
         }
     }
 
+    /// Al cambiar una página solo se vuelve a pintar esa; las demás siguen en caché.
+    pub fn olvidar_pagina(&mut self, n: i32) {
+        let antes = self.items.len();
+        self.items.retain(|((p, _), _)| *p != n);
+        if self.items.len() != antes {
+            self.total = self.items.iter().map(|(_, datos)| datos.len()).sum();
+        }
+    }
+
     pub fn vaciar(&mut self) {
         self.items.clear();
         self.total = 0;
@@ -74,5 +83,16 @@ mod pruebas {
         c.vaciar();
         assert!(c.leer((1, 100)).is_none());
         assert_eq!(c.total, 0);
+    }
+
+    #[test]
+    fn olvidar_una_pagina_deja_las_demas() {
+        let mut c = Cache::nuevo(10);
+        c.guardar((1, 100), vec![0; 2]);
+        c.guardar((2, 100), vec![0; 3]);
+        c.olvidar_pagina(1);
+        assert!(c.leer((1, 100)).is_none());
+        assert!(c.leer((2, 100)).is_some());
+        assert_eq!(c.total, 3);
     }
 }

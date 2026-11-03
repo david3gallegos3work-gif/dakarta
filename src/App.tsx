@@ -63,6 +63,21 @@ type Campo = {
   w: number
   h: number
 }
+/** Anotación propia que se puede tocar para mover, cambiar o borrar. */
+type Anotacion = {
+  pagina: number
+  xref: number
+  tipo: 'nota' | 'texto' | 'tinta' | 'resaltar' | 'subrayar' | 'tachar'
+  contenido: string
+  rojo: number
+  verde: number
+  azul: number
+  tamano: number
+  x: number
+  y: number
+  w: number
+  h: number
+}
 type Preview = {
   left: number
   top: number
@@ -76,17 +91,30 @@ type Preview = {
   puntos: [number, number][]
 }
 
-const COLORES_TEXTO: ReadonlyArray<readonly [string, string]> = [
+const COLORES_RESALTADO: ReadonlyArray<readonly [string, string]> = [
   ['#ffeb3b', 'Amarillo'],
   ['#a5d6a7', 'Verde'],
   ['#f8bbd0', 'Rosado'],
   ['#90caf9', 'Celeste'],
 ]
-const COLORES_LAPIZ: ReadonlyArray<readonly [string, string]> = [
+const COLORES_FUERTES: ReadonlyArray<readonly [string, string]> = [
   ['#000000', 'Negro'],
   ['#d32f2f', 'Rojo'],
   ['#1565c0', 'Azul'],
   ['#2e7d32', 'Verde'],
+  ['#6a1b9a', 'Morado'],
+]
+const COLORES_NOTA: ReadonlyArray<readonly [string, string]> = [
+  ['#ffc107', 'Amarillo'],
+  ['#f44336', 'Rojo'],
+  ['#2196f3', 'Azul'],
+  ['#4caf50', 'Verde'],
+]
+const COLORES_SELLO: ReadonlyArray<readonly [string, string]> = [
+  ['#2e7d32', 'Verde'],
+  ['#1565c0', 'Azul'],
+  ['#c62828', 'Rojo'],
+  ['#6a1b9a', 'Morado'],
 ]
 const SELLOS: ReadonlyArray<readonly [string, string]> = [
   ['APROBADO', '#2e7d32'],
@@ -94,11 +122,41 @@ const SELLOS: ReadonlyArray<readonly [string, string]> = [
   ['PAGADO', '#2e7d32'],
   ['CONFIDENCIAL', '#c62828'],
 ]
+const GROSORES: ReadonlyArray<readonly [number, string]> = [
+  [1.5, 'Fino'],
+  [3, 'Medio'],
+  [6, 'Grueso'],
+]
+const TAMANOS_TEXTO: ReadonlyArray<readonly [number, string]> = [
+  [10, 'Pequeño'],
+  [12, 'Normal'],
+  [18, 'Grande'],
+  [24, 'Título'],
+]
+const TAMANOS_NOTA: ReadonlyArray<readonly [number, string]> = [
+  [24, 'Pequeña'],
+  [40, 'Normal'],
+  [56, 'Grande'],
+]
+const TAMANOS_SELLO: ReadonlyArray<readonly [number, string]> = [
+  [18, 'Normal'],
+  [24, 'Grande'],
+  [32, 'Muy grande'],
+]
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
 const rgb = (hex: string): [number, number, number] => {
   const n = parseInt(hex.slice(1), 16)
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]
 }
+const hex = (r: number, g: number, b: number) =>
+  '#' +
+  [r, g, b]
+    .map((v) =>
+      Math.round(clamp01(v) * 255)
+        .toString(16)
+        .padStart(2, '0'),
+    )
+    .join('')
 
 /** Android: el selector de "Guardar copia" avisa por un evento; aquí se espera su destino. */
 function esperarDestino(nombre: string): Promise<string | null> {
@@ -161,10 +219,22 @@ export default function App() {
   const [recientes, setRecientes] = useState<Reciente[]>(leerRecientes)
   const [editando, setEditando] = useState(false)
   const [herramienta, setHerramienta] = useState<Herramienta>('mover')
-  const [colorTexto, setColorTexto] = useState(COLORES_TEXTO[0][0])
-  const [colorLapiz, setColorLapiz] = useState(COLORES_LAPIZ[0][0])
+  const [colorTexto, setColorTexto] = useState(COLORES_FUERTES[0][0])
+  const [colorResaltado, setColorResaltado] = useState(COLORES_RESALTADO[0][0])
+  const [colorLapiz, setColorLapiz] = useState(COLORES_FUERTES[0][0])
+  const [colorNota, setColorNota] = useState(COLORES_NOTA[0][0])
+  const [colorSello, setColorSello] = useState(COLORES_SELLO[0][0])
   const [grosor, setGrosor] = useState(3)
-  const [revision, setRevision] = useState(0)
+  const [tamanoTexto, setTamanoTexto] = useState(12)
+  const [tamanoSello, setTamanoSello] = useState(18)
+  const [tamanoNota, setTamanoNota] = useState(40)
+  /** La versión de cada página: al dibujar solo se vuelve a pedir esa, no todas. */
+  const [revisiones, setRevisiones] = useState<Record<number, number>>({})
+  /** Para deshacer todo, que afecta a varias páginas. */
+  const [revisionTotal, setRevisionTotal] = useState(0)
+  const [anots, setAnots] = useState<Record<number, Anotacion[]>>({})
+  const [seleccion, setSeleccion] = useState<Anotacion | null>(null)
+  const [campoPedido, setCampoPedido] = useState<{ campo: Campo; valor: string } | null>(null)
   const [sucio, setSucio] = useState(false)
   const [hechas, setHechas] = useState(0)
   const [avisoEdicion, setAvisoEdicion] = useState(false)
@@ -182,9 +252,7 @@ export default function App() {
   const [firmaTrazos, setFirmaTrazos] = useState<[number, number][][] | null>(null)
   const [campos, setCampos] = useState<Campo[]>([])
   const [selloAbierto, setSelloAbierto] = useState(false)
-  const [selloPendiente, setSelloPendiente] = useState<{ texto: string; rojo: number; verde: number; azul: number } | null>(
-    null,
-  )
+  const [selloPendiente, setSelloPendiente] = useState<{ texto: string } | null>(null)
   const [verBuscar, setVerBuscar] = useState(false)
   const [textoBuscar, setTextoBuscar] = useState('')
   const [busqueda, setBusqueda] = useState<Busqueda | null>(null)
@@ -217,6 +285,31 @@ export default function App() {
   herramientaRef.current = herramienta
 
   const hijos = () => contenido.current!.children as HTMLCollectionOf<HTMLElement>
+
+  /** Los errores internos de MuPDF no se muestran en crudo: se guarda el detalle para revisarlo. */
+  const fallo = useCallback((e: unknown) => {
+    console.error(e)
+    const detalle = String(e)
+    setError(detalle.startsWith('MuPDF error') ? 'No se pudo hacer ese cambio en el PDF. Inténtalo otra vez.' : detalle)
+  }, [])
+
+  const cargarAnotaciones = useCallback(async (n: number) => {
+    try {
+      const lista = await invoke<Anotacion[]>('anotaciones', { pagina: n })
+      setAnots((m) => ({ ...m, [n]: lista }))
+    } catch (e) {
+      console.error(e)
+    }
+  }, [])
+
+  /** Vuelve a pintar una sola página y recarga sus anotaciones. */
+  const refrescar = useCallback(
+    (n: number) => {
+      setRevisiones((r) => ({ ...r, [n]: (r[n] ?? 0) + 1 }))
+      void cargarAnotaciones(n)
+    },
+    [cargarAnotaciones],
+  )
 
   // La página actual se calcula al instante; el centro de las miniaturas cambia cada pocas páginas.
   const medir = useCallback(() => {
@@ -529,6 +622,10 @@ export default function App() {
         setSucio(false)
         setHechas(0)
         setPreview(null)
+        setSeleccion(null)
+        setAnots({})
+        setRevisiones({})
+        setRevisionTotal(0)
         avisoVisto.current = false
         setZoom(1)
         setVerIndice(false)
@@ -585,6 +682,7 @@ export default function App() {
   const entrarEditar = () => {
     setEditando(true)
     setHerramienta('mover')
+    setSeleccion(null)
     setAyudaManual(false)
     let oculto = false
     try {
@@ -619,19 +717,25 @@ export default function App() {
     setEditando(false)
     setHerramienta('mover')
     setPreview(null)
+    setSeleccion(null)
+  }
+
+  /** Elegir una herramienta; volver a tocarla la suelta y deja mover anotaciones. */
+  const elegir = (h: Herramienta) => {
+    setSeleccion(null)
+    setHerramienta((actual) => (actual === h ? 'mover' : h))
   }
 
   const deshacer = async () => {
     try {
-      const hecho = await invoke<boolean>('deshacer')
-      if (!hecho) return
+      const pagina = await invoke<number | null>('deshacer')
+      if (pagina === null) return
+      refrescar(pagina)
       const quedan = Math.max(0, hechas - 1)
-      setRevision((r) => r + 1)
       setHechas(quedan)
       setSucio(quedan > 0)
     } catch (e) {
-      console.error(e)
-      setError(String(e))
+      fallo(e)
     }
   }
 
@@ -640,12 +744,13 @@ export default function App() {
     try {
       const hecho = await invoke<boolean>('deshacer_todo')
       if (!hecho) return
-      setRevision((r) => r + 1)
+      setRevisionTotal((r) => r + 1)
+      setAnots({})
+      setSeleccion(null)
       setHechas(0)
       setSucio(false)
     } catch (e) {
-      console.error(e)
-      setError(String(e))
+      fallo(e)
     }
   }
 
@@ -653,22 +758,27 @@ export default function App() {
     const p = textoPedido
     const texto = textoEntrada.trim()
     if (!p || !texto) return
+    const [rojo, verde, azul] = rgb(p.modo === 'nota' ? colorNota : colorTexto)
     try {
-      await invoke(p.modo === 'nota' ? 'anotar_nota' : 'anotar_caja', { pagina: p.n, x: p.x, y: p.y, contenido: texto })
+      if (p.modo === 'nota') {
+        await invoke('anotar_nota', { pagina: p.n, x: p.x, y: p.y, contenido: texto, rojo, verde, azul, tamano: tamanoNota })
+      } else {
+        await invoke('anotar_caja', { pagina: p.n, x: p.x, y: p.y, contenido: texto, rojo, verde, azul, tamano: tamanoTexto })
+      }
       setTextoPedido(null)
       setTextoEntrada('')
-      setRevision((r) => r + 1)
+      setHerramienta('mover')
+      refrescar(p.n)
       setSucio(true)
       setHechas((h) => h + 1)
     } catch (e) {
-      console.error(e)
-      setError(String(e))
+      fallo(e)
     }
   }
 
   const elegirSello = (texto: string, color: string) => {
-    const [rojo, verde, azul] = rgb(color)
-    setSelloPendiente({ texto, rojo, verde, azul })
+    setSelloPendiente({ texto })
+    setColorSello(color)
     setSelloAbierto(false)
     setHerramienta('sello')
   }
@@ -678,55 +788,126 @@ export default function App() {
     setSelloPendiente(null)
     setHerramienta('mover')
     if (!s) return
+    const [rojo, verde, azul] = rgb(colorSello)
     try {
-      await invoke('anotar_sello', { pagina: n, x: fx, y: fy, texto: s.texto, rojo: s.rojo, verde: s.verde, azul: s.azul })
-      setRevision((r) => r + 1)
+      await invoke('anotar_sello', { pagina: n, x: fx, y: fy, texto: s.texto, rojo, verde, azul, tamano: tamanoSello })
+      refrescar(n)
       setSucio(true)
       setHechas((h) => h + 1)
     } catch (e) {
-      console.error(e)
-      setError(String(e))
+      fallo(e)
     }
   }
 
   const abrirFormulario = async () => {
+    setSeleccion(null)
     setHerramienta('formulario')
     try {
       const lista = await invoke<Campo[]>('campos')
       setCampos(lista)
       if (!lista.length) setExito('Este PDF no tiene formularios.')
     } catch (e) {
-      console.error(e)
-      setError(String(e))
+      fallo(e)
     }
   }
 
-  const tocarCampo = useCallback(async (c: Campo) => {
-    if (c.readonly) {
-      setError('Este campo está protegido y no se puede cambiar.')
-      return
-    }
-    let valor: string
-    if (/button|checkbox|radio/i.test(c.tipo)) {
-      valor = c.valor && c.valor !== 'Off' ? 'Off' : 'Yes'
-    } else {
-      const escrito = prompt(`Valor de «${c.nombre || 'campo'}»`, c.valor)
-      if (escrito === null) return
-      valor = escrito
-    }
-    try {
-      await invoke('poner_campo', { pagina: c.pagina, xref: c.xref, valor })
-      setCampos(await invoke<Campo[]>('campos'))
-      setRevision((r) => r + 1)
-      setSucio(true)
-      setHechas((h) => h + 1)
-    } catch (e) {
-      console.error(e)
-      setError(String(e))
-    }
-  }, [])
+  const ponerValorCampo = useCallback(
+    async (c: Campo, valor: string) => {
+      try {
+        await invoke('poner_campo', { pagina: c.pagina, xref: c.xref, valor })
+        setCampos(await invoke<Campo[]>('campos'))
+        refrescar(c.pagina)
+        setSucio(true)
+        setHechas((h) => h + 1)
+      } catch (e) {
+        fallo(e)
+      }
+    },
+    [refrescar, fallo],
+  )
+
+  const tocarCampo = useCallback(
+    (c: Campo) => {
+      if (c.readonly) {
+        setError('Este campo está protegido y no se puede cambiar.')
+        return
+      }
+      if (/button|checkbox|radio/i.test(c.tipo)) {
+        void ponerValorCampo(c, c.valor && c.valor !== 'Off' ? 'Off' : 'Yes')
+        return
+      }
+      setCampoPedido({ campo: c, valor: c.valor })
+    },
+    [ponerValorCampo],
+  )
+
+  const ponerCampo = async () => {
+    const p = campoPedido
+    setCampoPedido(null)
+    if (p) await ponerValorCampo(p.campo, p.valor)
+  }
+
+  const seleccionarAnotacion = useCallback((a: Anotacion) => setSeleccion(a), [])
+
+  const moverAnotacion = useCallback(
+    (a: Anotacion, dx: number, dy: number) => {
+      // Se mueve en pantalla al instante; el motor confirma y repinta esa página.
+      setAnots((m) => ({
+        ...m,
+        [a.pagina]: (m[a.pagina] ?? []).map((x) =>
+          x.xref === a.xref ? { ...x, x: clamp01(x.x + dx), y: clamp01(x.y + dy) } : x,
+        ),
+      }))
+      invoke('mover_anotacion', { pagina: a.pagina, xref: a.xref, dx, dy })
+        .then(() => {
+          refrescar(a.pagina)
+          setSucio(true)
+          setHechas((h) => h + 1)
+        })
+        .catch((e) => {
+          fallo(e)
+          refrescar(a.pagina)
+        })
+    },
+    [refrescar, fallo],
+  )
+
+  const aplicarAnotacion = useCallback(
+    async (a: Anotacion, cambios: { contenido?: string; color?: string; tamano?: number }) => {
+      const [rojo, verde, azul] = rgb(cambios.color ?? hex(a.rojo, a.verde, a.azul))
+      const args: Record<string, unknown> = { pagina: a.pagina, xref: a.xref, rojo, verde, azul }
+      if (cambios.contenido !== undefined) args.contenido = cambios.contenido
+      if (cambios.tamano !== undefined) args.tamano = cambios.tamano
+      try {
+        await invoke('editar_anotacion', args)
+        setSeleccion(null)
+        refrescar(a.pagina)
+        setSucio(true)
+        setHechas((h) => h + 1)
+      } catch (e) {
+        fallo(e)
+      }
+    },
+    [refrescar, fallo],
+  )
+
+  const borrarAnotacion = useCallback(
+    async (a: Anotacion) => {
+      try {
+        await invoke('borrar_anotacion', { pagina: a.pagina, xref: a.xref })
+        setSeleccion(null)
+        refrescar(a.pagina)
+        setSucio(true)
+        setHechas((h) => h + 1)
+      } catch (e) {
+        fallo(e)
+      }
+    },
+    [refrescar, fallo],
+  )
 
   const abrirFirma = () => {
+    setSeleccion(null)
     setPadTrazos([])
     setPadAbierto(true)
   }
@@ -747,14 +928,14 @@ export default function App() {
     const ajustados = trazos.map((t) =>
       t.map(([x, y]) => [clamp01(fx + (x - 0.5) * 0.3), clamp01(fy + (y - 0.5) * 0.1)] as [number, number]),
     )
+    const [rojo, verde, azul] = rgb(colorLapiz)
     try {
-      await invoke('anotar_tinta', { pagina: n, rojo: 0, verde: 0, azul: 0, grosor: 2, trazos: ajustados })
-      setRevision((r) => r + 1)
+      await invoke('anotar_tinta', { pagina: n, rojo, verde, azul, grosor, trazos: ajustados })
+      refrescar(n)
       setSucio(true)
       setHechas((h) => h + 1)
     } catch (e) {
-      console.error(e)
-      setError(String(e))
+      fallo(e)
     }
   }
 
@@ -797,6 +978,15 @@ export default function App() {
     const t = setTimeout(() => setExito(''), 3000)
     return () => clearTimeout(t)
   }, [exito])
+
+  // Al editar, las anotaciones de las páginas que se ven (y sus vecinas) se cargan para poder tocarlas.
+  useEffect(() => {
+    if (!editando || !doc) return
+    const [a, b] = visibles
+    for (let n = Math.max(0, a - 1); n <= Math.min(doc.info.paginas - 1, b + 1); n++) {
+      if (!(n in anots)) void cargarAnotaciones(n)
+    }
+  }, [editando, doc, visibles, anots, cargarAnotaciones])
 
   // El botón o gesto "atrás" de Android cierra primero el panel o la búsqueda; si no hay nada abierto, sale.
   useEffect(() => {
@@ -1009,83 +1199,97 @@ export default function App() {
 
       {editando && doc && (
         <div className="editar">
-          <button onClick={deshacer} disabled={!hechas} aria-label="Deshacer" title="Deshacer">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M9 14 4 9l5-5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M4 9h9.5a5.5 5.5 0 0 1 0 11H11" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-            </svg>
-          </button>
-          <button onClick={deshacerTodo} disabled={!hechas} aria-label="Deshacer todo" title="Deshacer todo">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
-              <path d="M16.2 8.2a5.6 5.6 0 1 0 1.6 4.6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-              <path d="M16.5 4.8v3.6h-3.6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-          <button aria-pressed={herramienta === 'mover'} onClick={() => setHerramienta('mover')}>
-            Mover
-          </button>
-          <button aria-pressed={herramienta === 'resaltar'} onClick={() => setHerramienta('resaltar')}>
-            Resaltar
-          </button>
-          <button aria-pressed={herramienta === 'subrayar'} onClick={() => setHerramienta('subrayar')}>
-            Subrayar
-          </button>
-          <button aria-pressed={herramienta === 'tachar'} onClick={() => setHerramienta('tachar')}>
-            Tachar
-          </button>
-          <button aria-pressed={herramienta === 'lapiz'} onClick={() => setHerramienta('lapiz')}>
-            Lápiz
-          </button>
-          <button aria-pressed={herramienta === 'nota'} onClick={() => setHerramienta('nota')}>
-            Nota
-          </button>
-          <button aria-pressed={herramienta === 'texto'} onClick={() => setHerramienta('texto')}>
-            Texto
-          </button>
-          <button aria-pressed={herramienta === 'firma'} onClick={abrirFirma}>
-            Firma
-          </button>
-          <button aria-pressed={herramienta === 'formulario'} onClick={abrirFormulario}>
-            Formulario
-          </button>
-          <button aria-pressed={herramienta === 'sello'} onClick={() => setSelloAbierto(true)}>
-            Sello
-          </button>
-          {(herramienta === 'lapiz' || herramienta === 'resaltar' || herramienta === 'subrayar' || herramienta === 'tachar') && (
-            <span className="colores">
-              {(herramienta === 'lapiz' ? COLORES_LAPIZ : COLORES_TEXTO).map(([c, n]) => (
-                <button
-                  key={c}
-                  className="color"
-                  style={{ background: c }}
-                  aria-label={n}
-                  title={n}
-                  aria-pressed={(herramienta === 'lapiz' ? colorLapiz : colorTexto) === c}
-                  onClick={() => (herramienta === 'lapiz' ? setColorLapiz(c) : setColorTexto(c))}
-                />
-              ))}
-            </span>
+          <div className="fila-herramientas">
+            <button onClick={deshacer} disabled={!hechas} aria-label="Deshacer" title="Deshacer">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M9 14 4 9l5-5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M4 9h9.5a5.5 5.5 0 0 1 0 11H11" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+              </svg>
+            </button>
+            <button onClick={deshacerTodo} disabled={!hechas} aria-label="Deshacer todo" title="Deshacer todo">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
+                <path d="M16.2 8.2a5.6 5.6 0 1 0 1.6 4.6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                <path d="M16.5 4.8v3.6h-3.6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button aria-pressed={herramienta === 'nota'} onClick={() => elegir('nota')}>
+              Nota
+            </button>
+            <button aria-pressed={herramienta === 'texto'} onClick={() => elegir('texto')}>
+              Texto
+            </button>
+            <button aria-pressed={herramienta === 'lapiz'} onClick={() => elegir('lapiz')}>
+              Lápiz
+            </button>
+            <button aria-pressed={herramienta === 'resaltar'} onClick={() => elegir('resaltar')}>
+              Resaltar
+            </button>
+            <button aria-pressed={herramienta === 'subrayar'} onClick={() => elegir('subrayar')}>
+              Subrayar
+            </button>
+            <button aria-pressed={herramienta === 'tachar'} onClick={() => elegir('tachar')}>
+              Tachar
+            </button>
+            <button aria-pressed={herramienta === 'firma'} onClick={abrirFirma}>
+              Firma
+            </button>
+            <button
+              aria-pressed={herramienta === 'sello'}
+              onClick={() => {
+                setSeleccion(null)
+                setSelloAbierto(true)
+              }}
+            >
+              Sello
+            </button>
+            <button aria-pressed={herramienta === 'formulario'} onClick={abrirFormulario}>
+              Formulario
+            </button>
+          </div>
+          {herramienta !== 'mover' && herramienta !== 'formulario' && (
+            <div className="fila-paleta">
+              {(herramienta === 'lapiz' || herramienta === 'firma') && (
+                <Paleta colores={COLORES_FUERTES} valor={colorLapiz} onCambio={setColorLapiz} />
+              )}
+              {(herramienta === 'subrayar' || herramienta === 'tachar' || herramienta === 'texto') && (
+                <Paleta colores={COLORES_FUERTES} valor={colorTexto} onCambio={setColorTexto} />
+              )}
+              {herramienta === 'resaltar' && (
+                <Paleta colores={COLORES_RESALTADO} valor={colorResaltado} onCambio={setColorResaltado} />
+              )}
+              {herramienta === 'nota' && <Paleta colores={COLORES_NOTA} valor={colorNota} onCambio={setColorNota} />}
+              {herramienta === 'sello' && <Paleta colores={COLORES_SELLO} valor={colorSello} onCambio={setColorSello} />}
+              {(herramienta === 'lapiz' || herramienta === 'firma' || herramienta === 'subrayar' || herramienta === 'tachar') && (
+                <Tamanos opciones={GROSORES} valor={grosor} onCambio={setGrosor} />
+              )}
+              {herramienta === 'texto' && <Tamanos opciones={TAMANOS_TEXTO} valor={tamanoTexto} onCambio={setTamanoTexto} />}
+              {herramienta === 'sello' && <Tamanos opciones={TAMANOS_SELLO} valor={tamanoSello} onCambio={setTamanoSello} />}
+              {herramienta === 'nota' && <Tamanos opciones={TAMANOS_NOTA} valor={tamanoNota} onCambio={setTamanoNota} />}
+              {(herramienta === 'nota' || herramienta === 'texto' || herramienta === 'firma' || herramienta === 'sello') && (
+                <span className="pista">Toca la página donde lo quieres</span>
+              )}
+            </div>
           )}
-          {herramienta === 'firma' && <span className="pista">Toca la página donde quieres la firma</span>}
-          {herramienta === 'sello' && <span className="pista">Toca la página donde quieres el sello</span>}
-          {herramienta === 'lapiz' && (
-            <span className="grosores">
-              {[1.5, 3, 6].map((g) => (
-                <button key={g} aria-pressed={grosor === g} onClick={() => setGrosor(g)}>
-                  {g === 1.5 ? 'Fino' : g === 3 ? 'Medio' : 'Grueso'}
-                </button>
-              ))}
-            </span>
+          {seleccion && herramienta === 'mover' && (
+            <PanelAnotacion
+              key={seleccion.xref}
+              a={seleccion}
+              onAplicar={(cambios) => void aplicarAnotacion(seleccion, cambios)}
+              onBorrar={() => void borrarAnotacion(seleccion)}
+              onCerrar={() => setSeleccion(null)}
+            />
           )}
-          <button onClick={guardarCopia} disabled={guardando}>
-            {guardando ? 'Guardando…' : 'Guardar copia'}
-          </button>
-          <button onClick={salirEditar}>Listo</button>
-          <button onClick={abrirAyuda} title="¿Qué puedo editar?">
-            ⓘ ¿Qué puedo editar?
-          </button>
-          {sucio && <span className="sin-guardar">Sin guardar</span>}
+          <div className="fila-acciones">
+            <button onClick={guardarCopia} disabled={guardando}>
+              {guardando ? 'Guardando…' : 'Guardar copia'}
+            </button>
+            <button onClick={salirEditar}>Listo</button>
+            <button onClick={abrirAyuda} title="¿Qué puedo editar?">
+              ⓘ ¿Qué puedo editar?
+            </button>
+            {sucio && <span className="sin-guardar">Sin guardar</span>}
+          </div>
         </div>
       )}
 
@@ -1209,13 +1413,9 @@ export default function App() {
               const fx = clamp01((e.clientX - r.left) / r.width)
               const fy = clamp01((e.clientY - r.top) / r.height)
               const listo = () => {
-                setRevision((v) => v + 1)
+                refrescar(g.n)
                 setSucio(true)
                 setHechas((h) => h + 1)
-              }
-              const fallo = (err: unknown) => {
-                console.error(err)
-                setError(String(err))
               }
               if (g.modo === 'tap') {
                 if (g.tipo === 'firma') {
@@ -1233,13 +1433,14 @@ export default function App() {
                 const [rojo, verde, azul] = rgb(colorLapiz)
                 invoke('anotar_tinta', { pagina: g.n, rojo, verde, azul, grosor, trazos: [g.puntos] }).then(listo).catch(fallo)
               } else {
-                const [rojo, verde, azul] = rgb(colorTexto)
+                const [rojo, verde, azul] = rgb(g.tipo === 'resaltar' ? colorResaltado : colorTexto)
                 invoke('anotar_texto', {
                   pagina: g.n,
                   tipo: g.tipo,
                   rojo,
                   verde,
                   azul,
+                  grosor,
                   x0: g.puntos[0][0],
                   y0: g.puntos[0][1],
                   x1: fx,
@@ -1266,9 +1467,14 @@ export default function App() {
                 recortes={recortes}
                 busqueda={busqueda}
                 coincidencia={coincidencia}
-                revision={revision}
+                revisiones={revisiones}
+                revisionTotal={revisionTotal}
                 campos={herramienta === 'formulario' ? campos : undefined}
                 onCampo={tocarCampo}
+                anots={editando && herramienta === 'mover' ? anots : undefined}
+                seleccion={seleccion?.xref ?? null}
+                onSeleccionar={seleccionarAnotacion}
+                onMover={moverAnotacion}
               />
             )}
             {preview && (
@@ -1360,8 +1566,9 @@ export default function App() {
             <h2 id="titulo-edicion">Edición básica de PDF</h2>
             <p>
               Puedes resaltar, subrayar, tachar, dibujar a mano, poner notas y cuadros de texto, firmar dibujando, rellenar
-              formularios y poner sellos. No se puede cambiar el texto original, las imágenes ni el diseño de la página: el
-              PDF está hecho para leerse, no para editarse. Al guardar se crea una copia; el archivo original no se toca.
+              formularios y poner sellos. Toca una anotación para cambiar su texto, color o tamaño, o arrástrala para moverla.
+              No se puede cambiar el texto original, las imágenes ni el diseño de la página: el PDF está hecho para leerse, no
+              para editarse. Al guardar se crea una copia; el archivo original no se toca.
             </p>
             <p>Si sales sin guardar, se pierden los cambios.</p>
             {!ayudaManual && (
@@ -1439,7 +1646,7 @@ export default function App() {
                     key={i}
                     points={t.map(([x, y]) => `${x * 100},${y * 100}`).join(' ')}
                     fill="none"
-                    stroke="#000"
+                    stroke={colorLapiz}
                     strokeWidth="1.5"
                     vectorEffect="non-scaling-stroke"
                   />
@@ -1484,6 +1691,26 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {campoPedido && (
+        <div className="fondo-aviso" role="dialog" aria-modal="true" aria-labelledby="titulo-campo">
+          <div className="tarjeta-aviso">
+            <h2 id="titulo-campo">{campoPedido.campo.nombre || 'Campo del formulario'}</h2>
+            <textarea
+              autoFocus
+              value={campoPedido.valor}
+              onChange={(e) => setCampoPedido({ ...campoPedido, valor: e.currentTarget.value })}
+              aria-label={campoPedido.campo.nombre || 'Valor del campo'}
+            />
+            <div className="fila-botones">
+              <button onClick={() => setCampoPedido(null)}>Cancelar</button>
+              <button className="grande" onClick={ponerCampo}>
+                Guardar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1503,9 +1730,14 @@ const Paginas = memo(function Paginas({
   recortes,
   busqueda,
   coincidencia,
-  revision,
+  revisiones,
+  revisionTotal,
   campos,
   onCampo,
+  anots,
+  seleccion,
+  onSeleccionar,
+  onMover,
 }: {
   doc: Doc
   ancho: number
@@ -1516,9 +1748,14 @@ const Paginas = memo(function Paginas({
   recortes: Recorte[]
   busqueda: Busqueda | null
   coincidencia: number
-  revision: number
+  revisiones: Record<number, number>
+  revisionTotal: number
   campos?: Campo[]
   onCampo: (c: Campo) => void
+  anots?: Record<number, Anotacion[]>
+  seleccion: number | null
+  onSeleccionar: (a: Anotacion) => void
+  onMover: (a: Anotacion, dx: number, dy: number) => void
 }) {
   // Alto/ancho real de las páginas ya pintadas que no miden como la primera.
   const [prop, setProp] = useState<Record<number, number>>({})
@@ -1568,9 +1805,14 @@ const Paginas = memo(function Paginas({
         resaltados={resaltados}
         actual={resaltados?.some((x) => x.i === coincidencia) ? coincidencia : -1}
         medida={medida}
-        revision={revision}
+        revision={revisiones[n] ?? 0}
+        revisionTotal={revisionTotal}
         campos={porCampo.get(n)}
         onCampo={onCampo}
+        anots={anots?.[n]}
+        seleccion={seleccion}
+        onSeleccionar={onSeleccionar}
+        onMover={onMover}
       />
     )
   })
@@ -1588,8 +1830,13 @@ const Pagina = memo(function Pagina({
   actual,
   medida,
   revision,
+  revisionTotal,
   campos,
   onCampo,
+  anots,
+  seleccion,
+  onSeleccionar,
+  onMover,
 }: {
   n: number
   id: number
@@ -1602,10 +1849,15 @@ const Pagina = memo(function Pagina({
   actual: number
   medida: (n: number, real: number) => void
   revision: number
+  revisionTotal: number
   campos?: Campo[]
   onCampo: (c: Campo) => void
+  anots?: Anotacion[]
+  seleccion: number | null
+  onSeleccionar: (a: Anotacion) => void
+  onMover: (a: Anotacion, dx: number, dy: number) => void
 }) {
-  const url = (w: number) => `${convertFileSrc(String(n), 'pagina')}?w=${w}&d=${id}&v=${revision}`
+  const url = (w: number) => `${convertFileSrc(String(n), 'pagina')}?w=${w}&d=${id}&v=${revisionTotal}-${revision}`
   return (
     <div className="pagina" data-n={n} style={{ width: ancho, height: alto }}>
       <span className="numero">{n + 1}</span>
@@ -1619,7 +1871,18 @@ const Pagina = memo(function Pagina({
         />
       )}
       {nitida > 0 && <Imagen src={url(nitida)} alCargar={(real) => medida(n, real)} />}
-      {recorte && <Detalle r={recorte} id={id} revision={revision} />}
+      {recorte && <Detalle r={recorte} id={id} revision={revision} revisionTotal={revisionTotal} />}
+      {anots?.map((a) => (
+        <CajaAnotacion
+          key={a.xref}
+          a={a}
+          ancho={ancho}
+          alto={alto}
+          seleccionada={seleccion === a.xref}
+          onSeleccionar={onSeleccionar}
+          onMover={onMover}
+        />
+      ))}
       {resaltados?.map(({ c, i }) => (
         <span
           key={i}
@@ -1656,9 +1919,9 @@ const Pagina = memo(function Pagina({
  * El recorte con el detalle exacto. Se posiciona en % de la página: al cambiar el zoom sigue en su sitio, solo estirado.
  * El anterior se queda visible hasta que llega el nuevo; encima, el nuevo es transparente mientras no ha cargado.
  */
-function Detalle({ r, id, revision }: { r: Recorte; id: number; revision: number }) {
+function Detalle({ r, id, revision, revisionTotal }: { r: Recorte; id: number; revision: number; revisionTotal: number }) {
   const direccion = (c: Recorte) =>
-    `${convertFileSrc(String(c.n), 'pagina')}?w=${c.W}&h=${c.H}&x=${c.x}&y=${c.y}&cw=${c.cw}&ch=${c.ch}&d=${id}&v=${revision}`
+    `${convertFileSrc(String(c.n), 'pagina')}?w=${c.W}&h=${c.H}&x=${c.x}&y=${c.y}&cw=${c.cw}&ch=${c.ch}&d=${id}&v=${revisionTotal}-${revision}`
   const [listo, setListo] = useState<Recorte | null>(null)
   return (listo && listo !== r ? [listo, r] : [r]).map((c) => (
     <img
@@ -1691,6 +1954,181 @@ function Imagen({ src, alCargar }: { src: string; alCargar: (proporcion: number)
       onLoad={(e) => alCargar(e.currentTarget.naturalHeight / e.currentTarget.naturalWidth)}
       onError={() => setFallo(src)}
     />
+  )
+}
+
+function Paleta({
+  colores,
+  valor,
+  onCambio,
+}: {
+  colores: ReadonlyArray<readonly [string, string]>
+  valor: string
+  onCambio: (c: string) => void
+}) {
+  return (
+    <span className="colores">
+      {colores.map(([c, n]) => (
+        <button
+          key={c}
+          type="button"
+          className="color"
+          style={{ background: c }}
+          aria-label={n}
+          title={n}
+          aria-pressed={valor.toLowerCase() === c.toLowerCase()}
+          onClick={() => onCambio(c)}
+        />
+      ))}
+      <label className="color otro" title="Otro color">
+        <input type="color" value={valor} onChange={(e) => onCambio(e.currentTarget.value)} aria-label="Otro color" />
+      </label>
+    </span>
+  )
+}
+
+function Tamanos({
+  opciones,
+  valor,
+  onCambio,
+}: {
+  opciones: ReadonlyArray<readonly [number, string]>
+  valor: number
+  onCambio: (n: number) => void
+}) {
+  return (
+    <span className="grosores">
+      {opciones.map(([v, n]) => (
+        <button key={v} type="button" aria-pressed={valor === v} onClick={() => onCambio(v)}>
+          {n}
+        </button>
+      ))}
+    </span>
+  )
+}
+
+const TITULOS_ANOTACION: Record<Anotacion['tipo'], string> = {
+  nota: 'Nota',
+  texto: 'Texto o sello',
+  tinta: 'Trazo o firma',
+  resaltar: 'Resaltado',
+  subrayar: 'Subrayado',
+  tachar: 'Tachado',
+}
+
+/** Caja invisible sobre una anotación: tocarla la elige y arrastrarla la mueve. */
+function CajaAnotacion({
+  a,
+  ancho,
+  alto,
+  seleccionada,
+  onSeleccionar,
+  onMover,
+}: {
+  a: Anotacion
+  ancho: number
+  alto: number
+  seleccionada: boolean
+  onSeleccionar: (a: Anotacion) => void
+  onMover: (a: Anotacion, dx: number, dy: number) => void
+}) {
+  const inicio = useRef<{ x: number; y: number } | null>(null)
+  const [desp, setDesp] = useState<{ x: number; y: number } | null>(null)
+  return (
+    <div
+      className={seleccionada ? 'anot seleccionada' : 'anot'}
+      style={{
+        left: `${a.x * 100}%`,
+        top: `${a.y * 100}%`,
+        width: `${a.w * 100}%`,
+        height: `${a.h * 100}%`,
+        transform: desp ? `translate(${desp.x}px, ${desp.y}px)` : undefined,
+      }}
+      title={TITULOS_ANOTACION[a.tipo]}
+      onPointerDown={(e) => {
+        e.stopPropagation()
+        e.preventDefault()
+        e.currentTarget.setPointerCapture(e.pointerId)
+        inicio.current = { x: e.clientX, y: e.clientY }
+        setDesp({ x: 0, y: 0 })
+      }}
+      onPointerMove={(e) => {
+        const i = inicio.current
+        if (!i) return
+        e.preventDefault()
+        setDesp({ x: e.clientX - i.x, y: e.clientY - i.y })
+      }}
+      onPointerUp={(e) => {
+        const i = inicio.current
+        inicio.current = null
+        setDesp(null)
+        if (!i) return
+        const dx = e.clientX - i.x
+        const dy = e.clientY - i.y
+        if (Math.hypot(dx, dy) > 5) onMover(a, dx / ancho, dy / alto)
+        else onSeleccionar(a)
+      }}
+      onPointerCancel={() => {
+        inicio.current = null
+        setDesp(null)
+      }}
+    />
+  )
+}
+
+/** Panel para cambiar el texto, el color, el tamaño o borrar la anotación elegida. */
+function PanelAnotacion({
+  a,
+  onAplicar,
+  onBorrar,
+  onCerrar,
+}: {
+  a: Anotacion
+  onAplicar: (cambios: { contenido?: string; color?: string; tamano?: number }) => void
+  onBorrar: () => void
+  onCerrar: () => void
+}) {
+  const [texto, setTexto] = useState(a.contenido)
+  const [color, setColor] = useState(hex(a.rojo, a.verde, a.azul))
+  const [tamano, setTamano] = useState(a.tamano)
+  const conTexto = a.tipo === 'nota' || a.tipo === 'texto'
+  const colores =
+    a.tipo === 'nota' ? COLORES_NOTA : a.tipo === 'resaltar' ? COLORES_RESALTADO : COLORES_FUERTES
+  const tamanos =
+    a.tipo === 'nota'
+      ? TAMANOS_NOTA
+      : a.tipo === 'texto'
+        ? TAMANOS_TEXTO
+        : a.tipo === 'tinta' || a.tipo === 'subrayar' || a.tipo === 'tachar'
+          ? GROSORES
+          : null
+  return (
+    <div className="fila-seleccion">
+      <strong>{TITULOS_ANOTACION[a.tipo]}</strong>
+      {conTexto && (
+        <textarea
+          value={texto}
+          onChange={(e) => setTexto(e.currentTarget.value)}
+          placeholder={a.tipo === 'nota' ? 'Texto de la nota' : 'Texto'}
+          aria-label={a.tipo === 'nota' ? 'Texto de la nota' : 'Texto'}
+        />
+      )}
+      <Paleta colores={colores} valor={color} onCambio={setColor} />
+      {tamanos && <Tamanos opciones={tamanos} valor={tamano} onCambio={setTamano} />}
+      <button
+        type="button"
+        disabled={conTexto && !texto.trim()}
+        onClick={() => onAplicar({ contenido: conTexto ? texto : undefined, color, tamano: tamanos ? tamano : undefined })}
+      >
+        Aplicar
+      </button>
+      <button type="button" onClick={onBorrar}>
+        Borrar
+      </button>
+      <button type="button" onClick={onCerrar}>
+        Cerrar
+      </button>
+    </div>
   )
 }
 

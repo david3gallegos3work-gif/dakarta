@@ -92,7 +92,7 @@ De estos cuatro, ya están el 1, el 3 y el 4. Falta el 2.
 ## Plan por etapas
 
 1. **Fase 1 — Prueba de velocidad:** abrir PDFs, pasar páginas, zoom, índice, modo noche. Medir tiempos con el PDF más pesado de David (idealmente un escaneado de 1000 hojas). Si va lento, corregir aquí antes de seguir.
-2. **Fase 2 — Anotar y firmar:** resaltar, subrayar, tachar, dibujar a mano, notas, cuadros de texto, sellos, rellenar formularios y firma dibujada. La firma digital con certificado quedó descartada por David (2026-11-02).
+2. **Fase 2 — Anotar y firmar (0.2.0):** resaltar, subrayar, tachar, dibujar a mano, notas, cuadros de texto, sellos, rellenar formularios y firma dibujada. En la 0.2.0 se corrigió el error de fondo de las anotaciones FreeText, se agregaron paletas de color y tamaño por herramienta, y ahora una anotación se toca y se arrastra directamente (sin botón "Mover") para moverla, cambiar su texto, color o tamaño, o borrarla; Deshacer cubre esos cambios. La firma digital con certificado quedó descartada por David (2026-11-02). Pendiente: probar en el celular.
 3. **Fase 3 — Unir y organizar páginas** (ver detalle abajo).
 4. **Fase 4 — Otros formatos:** TXT (ver y editar), DOCX (ver y edición sencilla), EPUB/FB2/XPS/CBZ (MuPDF ya los abre).
 5. **Fase 5 — Gemini** (ver detalle abajo).
