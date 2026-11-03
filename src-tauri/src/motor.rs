@@ -4,6 +4,7 @@ use std::sync::mpsc::{self, Sender};
 use std::time::Instant;
 
 use mupdf::color::AnnotationColor;
+use mupdf::pdf::annotation::{AnnotationTextAlign, PdfAnnotation, PdfAnnotationType};
 use mupdf::pdf::document::{PdfDocument, PdfWriteOptions};
 use mupdf::point::Point;
 use mupdf::quad::Quad;
@@ -77,6 +78,61 @@ pub struct Campo {
     h: f32,
 }
 
+/// Anotación que se puede tocar para mover, cambiar o borrar.
+#[derive(Serialize)]
+pub struct Anotacion {
+    pagina: i32,
+    xref: i32,
+    tipo: String,
+    contenido: String,
+    rojo: f32,
+    verde: f32,
+    azul: f32,
+    /// Tamaño de letra en textos, o grosor de línea en trazos y subrayados.
+    tamano: f32,
+    /// Caja en fracción de la página (0 a 1).
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+}
+
+/// Lo que se guarda para poder deshacer un cambio en una anotación.
+#[derive(Clone)]
+struct DatosAnotacion {
+    tipo: TipoAnot,
+    rect: Rect,
+    contenido: String,
+    color: (f32, f32, f32),
+    tamano: f32,
+    opacidad: f32,
+    trazos: Vec<Vec<Point>>,
+    quads: Vec<Quad>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum TipoAnot {
+    Nota,
+    Texto,
+    Tinta,
+    Resaltar,
+    Subrayar,
+    Tachar,
+}
+
+impl TipoAnot {
+    fn nombre(self) -> &'static str {
+        match self {
+            TipoAnot::Nota => "nota",
+            TipoAnot::Texto => "texto",
+            TipoAnot::Tinta => "tinta",
+            TipoAnot::Resaltar => "resaltar",
+            TipoAnot::Subrayar => "subrayar",
+            TipoAnot::Tachar => "tachar",
+        }
+    }
+}
+
 /// Ancho de las miniaturas que se ven mientras se desplaza (el mismo valor en src/zoom.ts).
 const MINIATURA: u32 = 384;
 const TOPE_CACHE: usize = 64 * 1024 * 1024;
@@ -111,7 +167,24 @@ enum TipoTexto {
 /// Lo que se puede deshacer en esta sesión.
 enum Hecho {
     Anotacion { n: i32, xref: i32 },
+    /// La anotación se movió o se le cambió el texto, el color o el tamaño.
+    Cambio { n: i32, xref: i32, antes: DatosAnotacion },
+    /// Se borró: para deshacer se vuelve a crear igual.
+    Borrada { n: i32, xref: i32, datos: DatosAnotacion },
     Campo { n: i32, xref: i32, anterior: String },
+}
+
+impl Hecho {
+    fn cambiar_xref(&mut self, viejo: i32, nuevo: i32) {
+        match self {
+            Hecho::Anotacion { xref, .. } | Hecho::Cambio { xref, .. } | Hecho::Borrada { xref, .. } => {
+                if *xref == viejo {
+                    *xref = nuevo;
+                }
+            }
+            Hecho::Campo { .. } => {}
+        }
+    }
 }
 
 enum Pedido {
@@ -122,6 +195,7 @@ enum Pedido {
         n: i32,
         tipo: TipoTexto,
         color: (f32, f32, f32),
+        grosor: f32,
         a: (f32, f32),
         b: (f32, f32),
         resp: Sender<Result<(), String>>,
@@ -138,6 +212,8 @@ enum Pedido {
         x: f32,
         y: f32,
         contenido: String,
+        color: (f32, f32, f32),
+        tamano: f32,
         resp: Sender<Result<(), String>>,
     },
     Caja {
@@ -145,6 +221,8 @@ enum Pedido {
         x: f32,
         y: f32,
         contenido: String,
+        color: (f32, f32, f32),
+        tamano: f32,
         resp: Sender<Result<(), String>>,
     },
     Sello {
@@ -153,9 +231,21 @@ enum Pedido {
         y: f32,
         texto: String,
         color: (f32, f32, f32),
+        tamano: f32,
         resp: Sender<Result<(), String>>,
     },
-    Deshacer { resp: Sender<Result<bool, String>> },
+    Anotaciones { n: i32, resp: Sender<Result<Vec<Anotacion>, String>> },
+    Mover { n: i32, xref: i32, dx: f32, dy: f32, resp: Sender<Result<(), String>> },
+    Editar {
+        n: i32,
+        xref: i32,
+        contenido: Option<String>,
+        color: Option<(f32, f32, f32)>,
+        tamano: Option<f32>,
+        resp: Sender<Result<(), String>>,
+    },
+    Borrar { n: i32, xref: i32, resp: Sender<Result<(), String>> },
+    Deshacer { resp: Sender<Result<Option<i32>, String>> },
     DeshacerTodo { resp: Sender<Result<bool, String>> },
     Campos { resp: Sender<Result<Vec<Campo>, String>> },
     Campo { n: i32, xref: i32, valor: String, resp: Sender<Result<(), String>> },
@@ -207,12 +297,12 @@ impl Motor {
                             };
                             let _ = resp.send(r);
                         }
-                        Pedido::Texto { n, tipo, color, a, b, resp } => {
+                        Pedido::Texto { n, tipo, color, grosor, a, b, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => anotar_texto(doc, n, tipo, color, a, b).map(|xref| {
+                                Some((doc, _)) => anotar_texto(doc, n, tipo, color, grosor, a, b).map(|xref| {
                                     hechas.push(Hecho::Anotacion { n, xref });
-                                    cache.vaciar();
+                                    cache.olvidar_pagina(n);
                                 }),
                             };
                             let _ = resp.send(r);
@@ -222,37 +312,80 @@ impl Motor {
                                 None => Err("No hay un documento abierto".into()),
                                 Some((doc, _)) => anotar_tinta(doc, n, color, grosor, &trazos).map(|xref| {
                                     hechas.push(Hecho::Anotacion { n, xref });
-                                    cache.vaciar();
+                                    cache.olvidar_pagina(n);
                                 }),
                             };
                             let _ = resp.send(r);
                         }
-                        Pedido::Nota { n, x, y, contenido, resp } => {
+                        Pedido::Nota { n, x, y, contenido, color, tamano, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => anotar_nota(doc, n, x, y, &contenido).map(|xref| {
+                                Some((doc, _)) => anotar_nota(doc, n, x, y, &contenido, color, tamano).map(|xref| {
                                     hechas.push(Hecho::Anotacion { n, xref });
-                                    cache.vaciar();
+                                    cache.olvidar_pagina(n);
                                 }),
                             };
                             let _ = resp.send(r);
                         }
-                        Pedido::Caja { n, x, y, contenido, resp } => {
+                        Pedido::Caja { n, x, y, contenido, color, tamano, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => anotar_caja(doc, n, x, y, &contenido).map(|xref| {
+                                Some((doc, _)) => anotar_caja(doc, n, x, y, &contenido, color, tamano).map(|xref| {
                                     hechas.push(Hecho::Anotacion { n, xref });
-                                    cache.vaciar();
+                                    cache.olvidar_pagina(n);
                                 }),
                             };
                             let _ = resp.send(r);
                         }
-                        Pedido::Sello { n, x, y, texto, color, resp } => {
+                        Pedido::Sello { n, x, y, texto, color, tamano, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => anotar_sello(doc, n, x, y, &texto, color).map(|xref| {
+                                Some((doc, _)) => anotar_sello(doc, n, x, y, &texto, color, tamano).map(|xref| {
                                     hechas.push(Hecho::Anotacion { n, xref });
-                                    cache.vaciar();
+                                    cache.olvidar_pagina(n);
+                                }),
+                            };
+                            let _ = resp.send(r);
+                        }
+                        Pedido::Anotaciones { n, resp } => {
+                            let r = match &abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => anotaciones_de(doc, n),
+                            };
+                            let _ = resp.send(r);
+                        }
+                        Pedido::Mover { n, xref, dx, dy, resp } => {
+                            let r = match &mut abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => datos_de(doc, n, xref).and_then(|antes| {
+                                    mover_anotacion(doc, n, xref, dx, dy).map(|()| {
+                                        hechas.push(Hecho::Cambio { n, xref, antes });
+                                        cache.olvidar_pagina(n);
+                                    })
+                                }),
+                            };
+                            let _ = resp.send(r);
+                        }
+                        Pedido::Editar { n, xref, contenido, color, tamano, resp } => {
+                            let r = match &mut abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => datos_de(doc, n, xref).and_then(|antes| {
+                                    editar_anotacion(doc, n, xref, contenido.as_deref(), color, tamano).map(|()| {
+                                        hechas.push(Hecho::Cambio { n, xref, antes });
+                                        cache.olvidar_pagina(n);
+                                    })
+                                }),
+                            };
+                            let _ = resp.send(r);
+                        }
+                        Pedido::Borrar { n, xref, resp } => {
+                            let r = match &mut abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => datos_de(doc, n, xref).and_then(|datos| {
+                                    borrar_anotacion(doc, n, xref).map(|()| {
+                                        hechas.push(Hecho::Borrada { n, xref, datos });
+                                        cache.olvidar_pagina(n);
+                                    })
                                 }),
                             };
                             let _ = resp.send(r);
@@ -269,7 +402,7 @@ impl Motor {
                                 None => Err("No hay un documento abierto".into()),
                                 Some((doc, _)) => fijar_campo(doc, n, xref, &valor).map(|anterior| {
                                     hechas.push(Hecho::Campo { n, xref, anterior });
-                                    cache.vaciar();
+                                    cache.olvidar_pagina(n);
                                 }),
                             };
                             let _ = resp.send(r);
@@ -277,11 +410,11 @@ impl Motor {
                         Pedido::Deshacer { resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => deshacer(doc, &mut hechas).map(|hecho| {
-                                    if hecho {
-                                        cache.vaciar();
+                                Some((doc, _)) => deshacer(doc, &mut hechas).map(|pagina| {
+                                    if let Some(n) = pagina {
+                                        cache.olvidar_pagina(n);
                                     }
-                                    hecho
+                                    pagina
                                 }),
                             };
                             let _ = resp.send(r);
@@ -357,7 +490,15 @@ impl Motor {
         rx.recv().map_err(texto)?
     }
 
-    pub fn anotar_texto(&self, n: i32, tipo: &str, color: (f32, f32, f32), a: (f32, f32), b: (f32, f32)) -> Result<(), String> {
+    pub fn anotar_texto(
+        &self,
+        n: i32,
+        tipo: &str,
+        color: (f32, f32, f32),
+        grosor: f32,
+        a: (f32, f32),
+        b: (f32, f32),
+    ) -> Result<(), String> {
         let tipo = match tipo {
             "resaltar" => TipoTexto::Resaltar,
             "subrayar" => TipoTexto::Subrayar,
@@ -365,7 +506,7 @@ impl Motor {
             _ => return Err("Herramienta no válida.".into()),
         };
         let (tx, rx) = mpsc::channel();
-        self.0.send(Pedido::Texto { n, tipo, color, a, b, resp: tx }).map_err(texto)?;
+        self.0.send(Pedido::Texto { n, tipo, color, grosor, a, b, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
@@ -375,21 +516,68 @@ impl Motor {
         rx.recv().map_err(texto)?
     }
 
-    pub fn anotar_nota(&self, n: i32, x: f32, y: f32, contenido: String) -> Result<(), String> {
+    pub fn anotar_nota(
+        &self,
+        n: i32,
+        x: f32,
+        y: f32,
+        contenido: String,
+        color: (f32, f32, f32),
+        tamano: f32,
+    ) -> Result<(), String> {
         let (tx, rx) = mpsc::channel();
-        self.0.send(Pedido::Nota { n, x, y, contenido, resp: tx }).map_err(texto)?;
+        self.0.send(Pedido::Nota { n, x, y, contenido, color, tamano, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
-    pub fn anotar_caja(&self, n: i32, x: f32, y: f32, contenido: String) -> Result<(), String> {
+    pub fn anotar_caja(&self, n: i32, x: f32, y: f32, contenido: String, color: (f32, f32, f32), tamano: f32) -> Result<(), String> {
         let (tx, rx) = mpsc::channel();
-        self.0.send(Pedido::Caja { n, x, y, contenido, resp: tx }).map_err(texto)?;
+        self.0.send(Pedido::Caja { n, x, y, contenido, color, tamano, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
-    pub fn anotar_sello(&self, n: i32, x: f32, y: f32, etiqueta: String, color: (f32, f32, f32)) -> Result<(), String> {
+    pub fn anotar_sello(
+        &self,
+        n: i32,
+        x: f32,
+        y: f32,
+        etiqueta: String,
+        color: (f32, f32, f32),
+        tamano: f32,
+    ) -> Result<(), String> {
         let (tx, rx) = mpsc::channel();
-        self.0.send(Pedido::Sello { n, x, y, texto: etiqueta, color, resp: tx }).map_err(texto)?;
+        self.0.send(Pedido::Sello { n, x, y, texto: etiqueta, color, tamano, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
+    pub fn anotaciones(&self, n: i32) -> Result<Vec<Anotacion>, String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Anotaciones { n, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
+    pub fn mover_anotacion(&self, n: i32, xref: i32, dx: f32, dy: f32) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Mover { n, xref, dx, dy, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
+    pub fn editar_anotacion(
+        &self,
+        n: i32,
+        xref: i32,
+        contenido: Option<String>,
+        color: Option<(f32, f32, f32)>,
+        tamano: Option<f32>,
+    ) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Editar { n, xref, contenido, color, tamano, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
+    pub fn borrar_anotacion(&self, n: i32, xref: i32) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Borrar { n, xref, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
@@ -405,7 +593,7 @@ impl Motor {
         rx.recv().map_err(texto)?
     }
 
-    pub fn deshacer(&self) -> Result<bool, String> {
+    pub fn deshacer(&self) -> Result<Option<i32>, String> {
         let (tx, rx) = mpsc::channel();
         self.0.send(Pedido::Deshacer { resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
@@ -531,6 +719,7 @@ fn anotar_texto(
     n: i32,
     tipo: TipoTexto,
     color: (f32, f32, f32),
+    grosor: f32,
     a: (f32, f32),
     b: (f32, f32),
 ) -> Result<i32, String> {
@@ -585,6 +774,8 @@ fn anotar_texto(
     annot.set_color(anotacion_color(color)).map_err(texto)?;
     if matches!(tipo, TipoTexto::Resaltar) {
         annot.set_opacity(0.4).map_err(texto)?;
+    } else {
+        annot.set_border_width(grosor.clamp(0.5, 20.0)).map_err(texto)?;
     }
     annot.update().map_err(texto)?;
     annot.xref().map_err(texto)
@@ -627,7 +818,15 @@ fn anotar_tinta(
 }
 
 /// Nota con el icono en la página; el texto se lee al abrir la nota en cualquier lector.
-fn anotar_nota(doc: &mut PdfDocument, n: i32, x: f32, y: f32, contenido: &str) -> Result<i32, String> {
+fn anotar_nota(
+    doc: &mut PdfDocument,
+    n: i32,
+    x: f32,
+    y: f32,
+    contenido: &str,
+    color: (f32, f32, f32),
+    tamano: f32,
+) -> Result<i32, String> {
     let contenido = contenido.trim();
     if contenido.is_empty() {
         return Err("Escribe la nota.".into());
@@ -637,19 +836,28 @@ fn anotar_nota(doc: &mut PdfDocument, n: i32, x: f32, y: f32, contenido: &str) -
     if caja.width() <= 0.0 || caja.height() <= 0.0 {
         return Err("La página está vacía.".into());
     }
-    let lado = 24.0_f32.min(caja.width() * 0.1);
+    // Un ícono más grande se puede tocar con el dedo y se ve mejor.
+    let lado = tamano.clamp(16.0, 96.0).min(caja.width() * 0.3);
     let x0 = (caja.x0 + x.clamp(0.0, 1.0) * caja.width()).min(caja.x1 - lado).max(caja.x0);
     let y0 = (caja.y0 + y.clamp(0.0, 1.0) * caja.height()).min(caja.y1 - lado).max(caja.y0);
     let rect = Rect::new(x0, y0, x0 + lado, y0 + lado);
     let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
     let mut annot = pdf.add_text_annotation(rect, contenido).map_err(texto)?;
-    annot.set_color(AnnotationColor::Rgb { red: 1.0, green: 0.8, blue: 0.0 }).map_err(texto)?;
+    annot.set_color(anotacion_color(color)).map_err(texto)?;
     annot.update().map_err(texto)?;
     annot.xref().map_err(texto)
 }
 
-/// Cuadro de texto: se abre desde el toque hacia la derecha y abajo, con fondo claro.
-fn anotar_caja(doc: &mut PdfDocument, n: i32, x: f32, y: f32, contenido: &str) -> Result<i32, String> {
+/// Cuadro de texto: se abre desde el toque hacia la derecha y abajo.
+fn anotar_caja(
+    doc: &mut PdfDocument,
+    n: i32,
+    x: f32,
+    y: f32,
+    contenido: &str,
+    color: (f32, f32, f32),
+    tamano: f32,
+) -> Result<i32, String> {
     let contenido = contenido.trim();
     if contenido.is_empty() {
         return Err("Escribe el texto.".into());
@@ -659,26 +867,27 @@ fn anotar_caja(doc: &mut PdfDocument, n: i32, x: f32, y: f32, contenido: &str) -
     if caja.width() <= 0.0 || caja.height() <= 0.0 {
         return Err("La página está vacía.".into());
     }
-    let lineas = envolver(contenido, 38);
-    let envuelto = lineas.join("\n");
-    let alto = (lineas.len() as f32 * 15.0 + 8.0).min(caja.height());
+    let tamano = tamano.clamp(6.0, 72.0);
     let ancho = (caja.width() * 0.6).min(260.0);
+    let ancho_chars = (ancho / (tamano * 0.5)).max(8.0) as usize;
+    let lineas = envolver(contenido, ancho_chars);
+    let envuelto = lineas.join("\n");
+    let alto = (lineas.len() as f32 * tamano * 1.3 + 8.0).min(caja.height());
     let x0 = (caja.x0 + x.clamp(0.0, 1.0) * caja.width()).min(caja.x1 - ancho).max(caja.x0);
     let y0 = (caja.y0 + y.clamp(0.0, 1.0) * caja.height()).min(caja.y1 - alto).max(caja.y0);
     let rect = Rect::new(x0, y0, x0 + ancho, y0 + alto);
     let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
     let mut annot = pdf.add_free_text_annotation(rect, &envuelto).map_err(texto)?;
     annot
-        .set_default_appearance("Helv", 12.0, Some(AnnotationColor::Rgb { red: 0.0, green: 0.0, blue: 0.0 }))
+        .set_default_appearance("Helv", tamano, Some(anotacion_color(color)))
         .map_err(texto)?;
-    annot.set_color(AnnotationColor::Rgb { red: 0.55, green: 0.55, blue: 0.55 }).map_err(texto)?;
-    annot.set_interior_color(AnnotationColor::Rgb { red: 1.0, green: 0.98, blue: 0.82 }).map_err(texto)?;
-    annot.set_border_width(0.8).map_err(texto)?;
+    annot.set_color(anotacion_color(color)).map_err(texto)?;
+    annot.set_border_width(1.0).map_err(texto)?;
     annot.update().map_err(texto)?;
     annot.xref().map_err(texto)
 }
 
-/// Sello de texto grande, centrado en el toque (un cuadro de texto con borde y fondo blanco).
+/// Sello de texto grande, centrado en el toque.
 fn anotar_sello(
     doc: &mut PdfDocument,
     n: i32,
@@ -686,24 +895,26 @@ fn anotar_sello(
     y: f32,
     etiqueta: &str,
     color: (f32, f32, f32),
+    tamano: f32,
 ) -> Result<i32, String> {
     let pagina = doc.load_page(n).map_err(texto)?;
     let caja = pagina.bounds().map_err(texto)?;
     if caja.width() <= 0.0 || caja.height() <= 0.0 {
         return Err("La página está vacía.".into());
     }
-    let ancho = (caja.width() * 0.4).min(170.0);
-    let alto = 46.0_f32.min(caja.height() * 0.1);
+    let tamano = tamano.clamp(8.0, 72.0);
+    let ancho = (caja.width() * 0.4).min(220.0);
+    let alto = (tamano * 2.2).max(32.0).min(caja.height() * 0.2);
     let x0 = (caja.x0 + x.clamp(0.0, 1.0) * caja.width() - ancho / 2.0).clamp(caja.x0, caja.x1 - ancho);
     let y0 = (caja.y0 + y.clamp(0.0, 1.0) * caja.height() - alto / 2.0).clamp(caja.y0, caja.y1 - alto);
     let rect = Rect::new(x0, y0, x0 + ancho, y0 + alto);
     let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
     let mut annot = pdf.add_free_text_annotation(rect, etiqueta).map_err(texto)?;
     annot
-        .set_default_appearance("Helv", 18.0, Some(anotacion_color(color)))
+        .set_default_appearance("Helv", tamano, Some(anotacion_color(color)))
         .map_err(texto)?;
     annot.set_color(anotacion_color(color)).map_err(texto)?;
-    annot.set_interior_color(AnnotationColor::Rgb { red: 1.0, green: 1.0, blue: 1.0 }).map_err(texto)?;
+    annot.set_quadding(AnnotationTextAlign::Center).map_err(texto)?;
     annot.set_border_width(2.0).map_err(texto)?;
     annot.update().map_err(texto)?;
     annot.xref().map_err(texto)
@@ -728,6 +939,230 @@ fn envolver(texto: &str, ancho: usize) -> Vec<String> {
     lineas
 }
 
+fn color_de(color: Option<AnnotationColor>, por_defecto: (f32, f32, f32)) -> (f32, f32, f32) {
+    match color {
+        Some(AnnotationColor::Rgb { red, green, blue }) => (red, green, blue),
+        Some(AnnotationColor::Gray(g)) => (g, g, g),
+        Some(AnnotationColor::Cmyk { cyan, magenta, yellow, key }) => {
+            let k = 1.0 - key;
+            ((1.0 - cyan) * k, (1.0 - magenta) * k, (1.0 - yellow) * k)
+        }
+        None => por_defecto,
+    }
+}
+
+/// Lee una anotación de las que Dakarta sabe mover y editar.
+fn leer_datos(a: &PdfAnnotation) -> Result<Option<DatosAnotacion>, String> {
+    let tipo = match a.r#type().map_err(texto)? {
+        PdfAnnotationType::Text => TipoAnot::Nota,
+        PdfAnnotationType::FreeText => TipoAnot::Texto,
+        PdfAnnotationType::Ink => TipoAnot::Tinta,
+        PdfAnnotationType::Highlight => TipoAnot::Resaltar,
+        PdfAnnotationType::Underline => TipoAnot::Subrayar,
+        PdfAnnotationType::StrikeOut => TipoAnot::Tachar,
+        _ => return Ok(None),
+    };
+    let rect = a.rect().map_err(texto)?;
+    if rect.width() <= 0.0 || rect.height() <= 0.0 {
+        return Ok(None);
+    }
+    let contenido = a.contents().map_err(texto)?.unwrap_or("").to_string();
+    let por_defecto = match tipo {
+        TipoAnot::Nota | TipoAnot::Resaltar => (1.0, 0.8, 0.0),
+        _ => (0.0, 0.0, 0.0),
+    };
+    let color = color_de(a.color().map_err(texto)?, por_defecto);
+    let tamano = match tipo {
+        TipoAnot::Nota => rect.width(),
+        TipoAnot::Texto => a.default_appearance().map_err(texto)?.map(|d| d.size).unwrap_or(12.0),
+        _ => a.border_width().map_err(texto).unwrap_or(1.0),
+    };
+    let opacidad = a.opacity().map_err(texto).unwrap_or(1.0);
+    let trazos = if tipo == TipoAnot::Tinta { a.ink_list().map_err(texto)? } else { Vec::new() };
+    if tipo == TipoAnot::Tinta && trazos.is_empty() {
+        return Ok(None);
+    }
+    let quads = match tipo {
+        TipoAnot::Resaltar | TipoAnot::Subrayar | TipoAnot::Tachar => a.quads().map_err(texto)?,
+        _ => Vec::new(),
+    };
+    Ok(Some(DatosAnotacion { tipo, rect, contenido, color, tamano, opacidad, trazos, quads }))
+}
+
+fn datos_de(doc: &PdfDocument, n: i32, xref: i32) -> Result<DatosAnotacion, String> {
+    let pdf = doc.load_pdf_page(n).map_err(texto)?;
+    let a = pdf
+        .annotations()
+        .find(|a| a.xref().ok() == Some(xref))
+        .ok_or("No se encontró la anotación.")?;
+    leer_datos(&a)?.ok_or_else(|| "Esta anotación no se puede cambiar.".into())
+}
+
+/// Anotaciones editables de una página, con su caja en fracción de la página.
+fn anotaciones_de(doc: &PdfDocument, n: i32) -> Result<Vec<Anotacion>, String> {
+    let pagina = doc.load_page(n).map_err(texto)?;
+    let caja = pagina.bounds().map_err(texto)?;
+    if caja.width() <= 0.0 || caja.height() <= 0.0 {
+        return Ok(Vec::new());
+    }
+    let pdf = doc.load_pdf_page(n).map_err(texto)?;
+    let mut lista = Vec::new();
+    for a in pdf.annotations() {
+        let Ok(Some(d)) = leer_datos(&a) else { continue };
+        let Ok(xref) = a.xref() else { continue };
+        let r = a.bounds().unwrap_or(d.rect);
+        lista.push(Anotacion {
+            pagina: n,
+            xref,
+            tipo: d.tipo.nombre().into(),
+            contenido: d.contenido,
+            rojo: d.color.0,
+            verde: d.color.1,
+            azul: d.color.2,
+            tamano: d.tamano,
+            x: ((r.x0 - caja.x0) / caja.width()).clamp(0.0, 1.0),
+            y: ((r.y0 - caja.y0) / caja.height()).clamp(0.0, 1.0),
+            w: ((r.x1 - r.x0) / caja.width()).clamp(0.0, 1.0),
+            h: ((r.y1 - r.y0) / caja.height()).clamp(0.0, 1.0),
+        });
+    }
+    Ok(lista)
+}
+
+fn aplicar_datos(a: &mut PdfAnnotation, d: &DatosAnotacion) -> Result<(), String> {
+    a.set_rect(d.rect).map_err(texto)?;
+    match d.tipo {
+        TipoAnot::Nota => {
+            a.set_contents(&d.contenido).map_err(texto)?;
+            a.set_color(anotacion_color(d.color)).map_err(texto)?;
+        }
+        TipoAnot::Texto => {
+            a.set_contents(&d.contenido).map_err(texto)?;
+            a.set_default_appearance("Helv", d.tamano, Some(anotacion_color(d.color))).map_err(texto)?;
+            a.set_color(anotacion_color(d.color)).map_err(texto)?;
+            a.set_border_width(1.0).map_err(texto)?;
+        }
+        TipoAnot::Tinta => {
+            a.set_color(anotacion_color(d.color)).map_err(texto)?;
+            a.set_border_width(d.tamano).map_err(texto)?;
+            a.set_ink_list(d.trazos.clone()).map_err(texto)?;
+        }
+        TipoAnot::Resaltar => {
+            a.set_color(anotacion_color(d.color)).map_err(texto)?;
+            a.set_quad_points(d.quads.clone()).map_err(texto)?;
+            a.set_opacity(d.opacidad.clamp(0.1, 1.0)).map_err(texto)?;
+        }
+        TipoAnot::Subrayar | TipoAnot::Tachar => {
+            a.set_color(anotacion_color(d.color)).map_err(texto)?;
+            a.set_border_width(d.tamano).map_err(texto)?;
+            a.set_quad_points(d.quads.clone()).map_err(texto)?;
+        }
+    }
+    a.update().map_err(texto)?;
+    Ok(())
+}
+
+fn crear_anotacion(doc: &mut PdfDocument, n: i32, d: &DatosAnotacion) -> Result<i32, String> {
+    let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
+    let mut a = match d.tipo {
+        TipoAnot::Nota => pdf.add_text_annotation(d.rect, &d.contenido).map_err(texto)?,
+        TipoAnot::Texto => pdf.add_free_text_annotation(d.rect, &d.contenido).map_err(texto)?,
+        TipoAnot::Tinta => pdf.add_ink_annotation(d.trazos.clone()).map_err(texto)?,
+        TipoAnot::Resaltar => pdf.add_highlight_annotation(d.quads.clone()).map_err(texto)?,
+        TipoAnot::Subrayar => pdf.add_underline_annotation(d.quads.clone()).map_err(texto)?,
+        TipoAnot::Tachar => pdf.add_strikeout_annotation(d.quads.clone()).map_err(texto)?,
+    };
+    aplicar_datos(&mut a, d)?;
+    a.xref().map_err(texto)
+}
+
+fn fijar(v: f32, min: f32, max: f32) -> f32 {
+    if min > max { v } else { v.clamp(min, max) }
+}
+
+fn mover_anotacion(doc: &mut PdfDocument, n: i32, xref: i32, dx: f32, dy: f32) -> Result<(), String> {
+    let pagina = doc.load_page(n).map_err(texto)?;
+    let caja = pagina.bounds().map_err(texto)?;
+    let mut d = datos_de(doc, n, xref)?;
+    let dx = fijar(dx * caja.width(), caja.x0 - d.rect.x0, caja.x1 - d.rect.x1);
+    let dy = fijar(dy * caja.height(), caja.y0 - d.rect.y0, caja.y1 - d.rect.y1);
+    d.rect = d.rect.translate(dx, dy);
+    if d.tipo == TipoAnot::Tinta {
+        for trazo in &mut d.trazos {
+            for p in trazo {
+                p.x += dx;
+                p.y += dy;
+            }
+        }
+    }
+    if matches!(d.tipo, TipoAnot::Resaltar | TipoAnot::Subrayar | TipoAnot::Tachar) {
+        for q in &mut d.quads {
+            for p in [&mut q.ul, &mut q.ur, &mut q.ll, &mut q.lr] {
+                p.x += dx;
+                p.y += dy;
+            }
+        }
+    }
+    let pdf = doc.load_pdf_page(n).map_err(texto)?;
+    let mut a = pdf
+        .annotations()
+        .find(|a| a.xref().ok() == Some(xref))
+        .ok_or("No se encontró la anotación.")?;
+    aplicar_datos(&mut a, &d)
+}
+
+fn ajustar_texto(rect: Rect, contenido: &str, tamano: f32, caja: Rect) -> Rect {
+    let ancho_chars = (rect.width() / (tamano * 0.5)).max(8.0) as usize;
+    let lineas = envolver(contenido, ancho_chars);
+    let alto = (lineas.len() as f32 * tamano * 1.3 + 8.0).min(caja.height());
+    Rect::new(rect.x0, rect.y0, rect.x1, (rect.y0 + alto).min(caja.y1))
+}
+
+fn editar_anotacion(
+    doc: &mut PdfDocument,
+    n: i32,
+    xref: i32,
+    contenido: Option<&str>,
+    color: Option<(f32, f32, f32)>,
+    tamano: Option<f32>,
+) -> Result<(), String> {
+    let pagina = doc.load_page(n).map_err(texto)?;
+    let caja = pagina.bounds().map_err(texto)?;
+    let mut d = datos_de(doc, n, xref)?;
+    if let Some(c) = contenido {
+        let c = c.trim();
+        if c.is_empty() {
+            return Err("Escribe el texto.".into());
+        }
+        if matches!(d.tipo, TipoAnot::Nota | TipoAnot::Texto) {
+            d.contenido = c.to_string();
+        }
+    }
+    if let Some(c) = color {
+        d.color = c;
+    }
+    if let Some(t) = tamano {
+        d.tamano = match d.tipo {
+            TipoAnot::Nota => t.clamp(16.0, 96.0),
+            TipoAnot::Texto => t.clamp(6.0, 72.0),
+            TipoAnot::Tinta | TipoAnot::Subrayar | TipoAnot::Tachar => t.clamp(0.5, 20.0),
+            _ => d.tamano,
+        };
+    }
+    if d.tipo == TipoAnot::Nota {
+        d.rect = Rect::new(d.rect.x0, d.rect.y0, (d.rect.x0 + d.tamano).min(caja.x1), (d.rect.y0 + d.tamano).min(caja.y1));
+    }
+    if d.tipo == TipoAnot::Texto {
+        d.rect = ajustar_texto(d.rect, &d.contenido, d.tamano, caja);
+    }
+    let pdf = doc.load_pdf_page(n).map_err(texto)?;
+    let mut a = pdf
+        .annotations()
+        .find(|a| a.xref().ok() == Some(xref))
+        .ok_or("No se encontró la anotación.")?;
+    aplicar_datos(&mut a, &d)
+}
+
 fn borrar_anotacion(doc: &mut PdfDocument, n: i32, xref: i32) -> Result<(), String> {
     let mut pagina = doc.load_pdf_page(n).map_err(texto)?;
     let encontrada = pagina.annotations().find(|a| a.xref().ok() == Some(xref));
@@ -737,18 +1172,14 @@ fn borrar_anotacion(doc: &mut PdfDocument, n: i32, xref: i32) -> Result<(), Stri
     Ok(())
 }
 
-/// Deshace el último cambio de esta sesión.
-fn deshacer(doc: &mut PdfDocument, hechas: &mut Vec<Hecho>) -> Result<bool, String> {
+/// Deshace el último cambio de esta sesión y devuelve la página que hay que volver a pintar.
+fn deshacer(doc: &mut PdfDocument, hechas: &mut Vec<Hecho>) -> Result<Option<i32>, String> {
     let Some(hecho) = hechas.pop() else {
-        return Ok(false);
+        return Ok(None);
     };
-    match hecho {
-        Hecho::Anotacion { n, xref } => borrar_anotacion(doc, n, xref)?,
-        Hecho::Campo { n, xref, anterior } => {
-            fijar_campo(doc, n, xref, &anterior)?;
-        }
-    }
-    Ok(true)
+    let n = pagina_de(&hecho);
+    deshacer_hecho(doc, hecho, hechas)?;
+    Ok(Some(n))
 }
 
 /// Vuelve al estado de la última vez que se guardó.
@@ -756,16 +1187,38 @@ fn deshacer_todo(doc: &mut PdfDocument, hechas: &mut Vec<Hecho>) -> Result<bool,
     if hechas.is_empty() {
         return Ok(false);
     }
-    for hecho in hechas.iter().rev() {
-        match hecho {
-            Hecho::Anotacion { n, xref } => borrar_anotacion(doc, *n, *xref)?,
-            Hecho::Campo { n, xref, anterior } => {
-                fijar_campo(doc, *n, *xref, anterior)?;
-            }
-        }
+    while let Some(hecho) = hechas.pop() {
+        deshacer_hecho(doc, hecho, hechas)?;
     }
-    hechas.clear();
     Ok(true)
+}
+
+fn pagina_de(hecho: &Hecho) -> i32 {
+    match hecho {
+        Hecho::Anotacion { n, .. } | Hecho::Cambio { n, .. } | Hecho::Borrada { n, .. } | Hecho::Campo { n, .. } => *n,
+    }
+}
+
+fn deshacer_hecho(doc: &mut PdfDocument, hecho: Hecho, hechas: &mut Vec<Hecho>) -> Result<(), String> {
+    match hecho {
+        Hecho::Anotacion { n, xref } => borrar_anotacion(doc, n, xref),
+        Hecho::Cambio { n, xref, antes } => {
+            let pdf = doc.load_pdf_page(n).map_err(texto)?;
+            if let Some(mut a) = pdf.annotations().find(|a| a.xref().ok() == Some(xref)) {
+                aplicar_datos(&mut a, &antes)?;
+            }
+            Ok(())
+        }
+        Hecho::Borrada { n, xref, datos } => {
+            let nuevo = crear_anotacion(doc, n, &datos)?;
+            // Las acciones anteriores apuntan al número viejo: ahora es este.
+            for h in hechas.iter_mut() {
+                h.cambiar_xref(xref, nuevo);
+            }
+            Ok(())
+        }
+        Hecho::Campo { n, xref, anterior } => fijar_campo(doc, n, xref, &anterior).map(|_| ()),
+    }
 }
 
 /// Todos los campos de formulario del documento, con su caja en fracción de la página.

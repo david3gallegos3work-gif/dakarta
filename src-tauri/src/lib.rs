@@ -3,7 +3,7 @@ mod motor;
 
 use std::sync::Mutex;
 
-use motor::{Busqueda, Campo, Info, Motor};
+use motor::{Anotacion, Busqueda, Campo, Info, Motor};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_opener::OpenerExt;
@@ -45,12 +45,13 @@ async fn anotar_texto(
     rojo: f32,
     verde: f32,
     azul: f32,
+    grosor: f32,
     x0: f32,
     y0: f32,
     x1: f32,
     y1: f32,
 ) -> Result<(), String> {
-    motor.anotar_texto(pagina, &tipo, (rojo, verde, azul), (x0, y0), (x1, y1))
+    motor.anotar_texto(pagina, &tipo, (rojo, verde, azul), grosor, (x0, y0), (x1, y1))
 }
 
 #[tauri::command]
@@ -67,13 +68,33 @@ async fn anotar_tinta(
 }
 
 #[tauri::command]
-async fn anotar_nota(motor: State<'_, Motor>, pagina: i32, x: f32, y: f32, contenido: String) -> Result<(), String> {
-    motor.anotar_nota(pagina, x, y, contenido)
+async fn anotar_nota(
+    motor: State<'_, Motor>,
+    pagina: i32,
+    x: f32,
+    y: f32,
+    contenido: String,
+    rojo: f32,
+    verde: f32,
+    azul: f32,
+    tamano: f32,
+) -> Result<(), String> {
+    motor.anotar_nota(pagina, x, y, contenido, (rojo, verde, azul), tamano)
 }
 
 #[tauri::command]
-async fn anotar_caja(motor: State<'_, Motor>, pagina: i32, x: f32, y: f32, contenido: String) -> Result<(), String> {
-    motor.anotar_caja(pagina, x, y, contenido)
+async fn anotar_caja(
+    motor: State<'_, Motor>,
+    pagina: i32,
+    x: f32,
+    y: f32,
+    contenido: String,
+    rojo: f32,
+    verde: f32,
+    azul: f32,
+    tamano: f32,
+) -> Result<(), String> {
+    motor.anotar_caja(pagina, x, y, contenido, (rojo, verde, azul), tamano)
 }
 
 #[tauri::command]
@@ -86,8 +107,42 @@ async fn anotar_sello(
     rojo: f32,
     verde: f32,
     azul: f32,
+    tamano: f32,
 ) -> Result<(), String> {
-    motor.anotar_sello(pagina, x, y, texto, (rojo, verde, azul))
+    motor.anotar_sello(pagina, x, y, texto, (rojo, verde, azul), tamano)
+}
+
+#[tauri::command]
+async fn anotaciones(motor: State<'_, Motor>, pagina: i32) -> Result<Vec<Anotacion>, String> {
+    motor.anotaciones(pagina)
+}
+
+#[tauri::command]
+async fn mover_anotacion(motor: State<'_, Motor>, pagina: i32, xref: i32, dx: f32, dy: f32) -> Result<(), String> {
+    motor.mover_anotacion(pagina, xref, dx, dy)
+}
+
+#[tauri::command]
+async fn editar_anotacion(
+    motor: State<'_, Motor>,
+    pagina: i32,
+    xref: i32,
+    contenido: Option<String>,
+    rojo: Option<f32>,
+    verde: Option<f32>,
+    azul: Option<f32>,
+    tamano: Option<f32>,
+) -> Result<(), String> {
+    let color = match (rojo, verde, azul) {
+        (Some(r), Some(g), Some(b)) => Some((r, g, b)),
+        _ => None,
+    };
+    motor.editar_anotacion(pagina, xref, contenido, color, tamano)
+}
+
+#[tauri::command]
+async fn borrar_anotacion(motor: State<'_, Motor>, pagina: i32, xref: i32) -> Result<(), String> {
+    motor.borrar_anotacion(pagina, xref)
 }
 
 #[tauri::command]
@@ -101,7 +156,7 @@ async fn poner_campo(motor: State<'_, Motor>, pagina: i32, xref: i32, valor: Str
 }
 
 #[tauri::command]
-async fn deshacer(motor: State<'_, Motor>) -> Result<bool, String> {
+async fn deshacer(motor: State<'_, Motor>) -> Result<Option<i32>, String> {
     motor.deshacer()
 }
 
@@ -215,6 +270,10 @@ pub fn run() {
     anotar_nota,
     anotar_caja,
     anotar_sello,
+    anotaciones,
+    mover_anotacion,
+    editar_anotacion,
+    borrar_anotacion,
     campos,
     poner_campo,
     deshacer,

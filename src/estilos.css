@@ -30,8 +30,10 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .buscar-aviso { margin: 0; padding: 0 10px 8px; color: #b71c1c; font-size: 14px; }
 .buscar-nota { margin: 0; padding: 0 10px 8px; color: #455a64; font-size: 14px; }
 
-.editar { flex: none; display: flex; align-items: center; gap: 4px; padding: 6px; overflow-x: auto; white-space: nowrap; background: #e8eef5; border-bottom: 1px solid #cfd8e3; scrollbar-width: none; }
-.editar::-webkit-scrollbar { display: none; }
+.editar { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 6px; background: #e8eef5; border-bottom: 1px solid #cfd8e3; }
+.fila-herramientas, .fila-paleta, .fila-acciones, .fila-seleccion { display: flex; align-items: center; gap: 4px; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+.fila-herramientas::-webkit-scrollbar, .fila-paleta::-webkit-scrollbar, .fila-acciones::-webkit-scrollbar, .fila-seleccion::-webkit-scrollbar { display: none; }
+.fila-acciones { padding-top: 4px; border-top: 1px solid #cfd8e3; }
 .editar button { min-height: 34px; padding: 0 10px; border: 1px solid #9fb3c8; border-radius: 6px; background: #fff; color: #1a1a1a; font: inherit; font-size: 14px; cursor: pointer; }
 .editar button[aria-pressed='true'] { background: #1565c0; border-color: #1565c0; color: #fff; }
 .editar button:disabled { opacity: 0.4; cursor: default; }
@@ -42,6 +44,19 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .editar .color[aria-pressed='true'] { box-shadow: 0 0 0 2px #1565c0; }
 .editar .sin-guardar { flex: none; padding: 0 6px; color: #b71c1c; font-size: 13px; }
 .editar .pista { flex: none; padding: 0 6px; color: #1565c0; font-size: 13px; }
+
+/* Elegir cualquier color: el círculo abre el selector del sistema. */
+.editar .color.otro { position: relative; overflow: hidden; background: conic-gradient(#f44336, #ffeb3b, #4caf50, #2196f3, #9c27b0, #f44336); cursor: pointer; }
+.editar .color.otro input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+
+/* Cajas invisibles sobre las anotaciones: se tocan para elegir y arrastrar para mover. */
+.anot { position: absolute; z-index: 2; min-width: 28px; min-height: 28px; border: 1.5px dashed rgba(21, 101, 192, 0.55); border-radius: 3px; background: rgba(21, 101, 192, 0.06); touch-action: none; cursor: grab; }
+.anot.seleccionada { border: 2px solid #f57c00; background: rgba(245, 124, 0, 0.12); cursor: grabbing; }
+
+/* Panel de la anotación elegida. */
+.fila-seleccion { flex-wrap: wrap; align-items: flex-start; padding: 6px; border: 1px solid #cfd8e3; border-radius: 6px; background: #f5f8fc; }
+.fila-seleccion strong { flex: none; align-self: center; font-size: 14px; color: #455a64; }
+.fila-seleccion textarea { flex: 1 1 100%; min-height: 56px; padding: 8px; border: 1px solid #9fb3c8; border-radius: 6px; background: #fff; color: #1a1a1a; font: inherit; font-size: 14px; resize: vertical; }
 
 .preview { position: absolute; pointer-events: none; }
 .preview-texto { position: absolute; background: rgba(21, 101, 192, 0.3); border: 1px solid rgba(21, 101, 192, 0.8); }
@@ -131,6 +146,12 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .noche .recientes-panel button:hover { background: #3a3a3a; }
 .noche .editar { background: #222; border-color: #333; }
 .noche .editar button { background: #2f2f2f; border-color: #444; color: #eee; }
+.noche .fila-acciones { border-color: #333; }
+.noche .fila-seleccion { background: #242424; border-color: #3a3a3a; }
+.noche .fila-seleccion strong { color: #bbb; }
+.noche .fila-seleccion textarea { background: #2f2f2f; border-color: #555; color: #eee; }
+.noche .anot { border-color: rgba(144, 202, 249, 0.55); background: rgba(144, 202, 249, 0.08); }
+.noche .anot.seleccionada { border-color: #ffb74d; background: rgba(255, 183, 77, 0.15); }
 .noche .editar button[aria-pressed='true'] { background: #1565c0; border-color: #1565c0; color: #fff; }
 .noche .editar .color { border-color: #1a1a1a; box-shadow: 0 0 0 1px #777; }
 .noche .editar .sin-guardar { color: #ff8a80; }
