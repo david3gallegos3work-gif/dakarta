@@ -226,6 +226,15 @@ enum Pedido {
         tamano: f32,
         resp: Sender<Result<(), String>>,
     },
+    Redimensionar {
+        n: i32,
+        xref: i32,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        resp: Sender<Result<(), String>>,
+    },
     Caja {
         n: i32,
         x: f32,
@@ -396,6 +405,18 @@ impl Motor {
                                             h.cambiar_xref(xref, nuevo);
                                         }
                                         hechas.push(Hecho::Cambio { n, xref: nuevo, antes });
+                                        cache.olvidar_pagina(n);
+                                    })
+                                }),
+                            };
+                            let _ = resp.send(r);
+                        }
+                        Pedido::Redimensionar { n, xref, x, y, w, h, resp } => {
+                            let r = match &mut abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => datos_de(doc, n, xref).and_then(|antes| {
+                                    redimensionar_anotacion(doc, n, xref, x, y, w, h).map(|()| {
+                                        hechas.push(Hecho::Cambio { n, xref, antes });
                                         cache.olvidar_pagina(n);
                                     })
                                 }),
@@ -588,6 +609,12 @@ impl Motor {
     pub fn mover_anotacion(&self, n: i32, xref: i32, dx: f32, dy: f32) -> Result<(), String> {
         let (tx, rx) = mpsc::channel();
         self.0.send(Pedido::Mover { n, xref, dx, dy, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
+    pub fn redimensionar_anotacion(&self, n: i32, xref: i32, x: f32, y: f32, w: f32, h: f32) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Redimensionar { n, xref, x, y, w, h, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
@@ -907,7 +934,9 @@ fn anotar_caja(
         return Err("La página está vacía.".into());
     }
     let tamano = tamano.clamp(6.0, 72.0);
-    let ancho = (caja.width() * 0.6).min(260.0);
+    // El cuadro mide lo que el texto, no un ancho fijo de la página.
+    let largo = contenido.lines().map(|l| l.chars().count()).max().unwrap_or(1) as f32;
+    let ancho = (largo * tamano * 0.55 + 14.0).clamp(60.0, caja.width() * 0.9);
     let ancho_chars = (ancho / (tamano * 0.5)).max(8.0) as usize;
     let lineas = envolver(contenido, ancho_chars);
     let envuelto = lineas.join("\n");
@@ -940,8 +969,9 @@ fn anotar_sello(
         return Err("La página está vacía.".into());
     }
     let tamano = tamano.clamp(8.0, 72.0);
-    let ancho = (caja.width() * 0.4).min(220.0);
-    let alto = (tamano * 2.2).max(32.0).min(caja.height() * 0.2);
+    // El recuadro queda pegado a la etiqueta; se puede agrandar arrastrando su esquina.
+    let ancho = (etiqueta.chars().count() as f32 * tamano * 0.62 + 20.0).clamp(60.0, caja.width() * 0.9);
+    let alto = (tamano * 1.5 + 12.0).clamp(30.0, caja.height() * 0.2);
     let x0 = (caja.x0 + x.clamp(0.0, 1.0) * caja.width() - ancho / 2.0).clamp(caja.x0, caja.x1 - ancho);
     let y0 = (caja.y0 + y.clamp(0.0, 1.0) * caja.height() - alto / 2.0).clamp(caja.y0, caja.y1 - alto);
     let rect = Rect::new(x0, y0, x0 + ancho, y0 + alto);
@@ -997,7 +1027,12 @@ fn leer_datos(a: &PdfAnnotation) -> Result<Option<DatosAnotacion>, String> {
         PdfAnnotationType::StrikeOut => TipoAnot::Tachar,
         _ => return Ok(None),
     };
-    let rect = a.rect().map_err(texto)?;
+    let trazos = if tipo == TipoAnot::Tinta { a.ink_list().map_err(texto)? } else { Vec::new() };
+    if tipo == TipoAnot::Tinta && trazos.is_empty() {
+        return Ok(None);
+    }
+    // MuPDF no da el Rect de una tinta: su caja sale de los trazos.
+    let rect = if tipo == TipoAnot::Tinta { rect_de_trazos(&trazos) } else { a.rect().map_err(texto)? };
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
         return Ok(None);
     }
@@ -1022,15 +1057,27 @@ fn leer_datos(a: &PdfAnnotation) -> Result<Option<DatosAnotacion>, String> {
         _ => a.border_width().map_err(texto).unwrap_or(1.0),
     };
     let opacidad = a.opacity().map_err(texto).unwrap_or(1.0);
-    let trazos = if tipo == TipoAnot::Tinta { a.ink_list().map_err(texto)? } else { Vec::new() };
-    if tipo == TipoAnot::Tinta && trazos.is_empty() {
-        return Ok(None);
-    }
     let quads = match tipo {
         TipoAnot::Resaltar | TipoAnot::Subrayar | TipoAnot::Tachar => a.quads().map_err(texto)?,
         _ => Vec::new(),
     };
     Ok(Some(DatosAnotacion { tipo, rect, contenido, color, tamano, opacidad, trazos, quads }))
+}
+
+/// Caja de una anotación de tinta: la que ocupan sus trazos, con un punto de margen para poder tocarla.
+fn rect_de_trazos(trazos: &[Vec<Point>]) -> Rect {
+    let mut puntos = trazos.iter().flatten();
+    let Some(p) = puntos.next() else {
+        return Rect::new(0.0, 0.0, 0.0, 0.0);
+    };
+    let (mut x0, mut y0, mut x1, mut y1) = (p.x, p.y, p.x, p.y);
+    for p in puntos {
+        x0 = x0.min(p.x);
+        y0 = y0.min(p.y);
+        x1 = x1.max(p.x);
+        y1 = y1.max(p.y);
+    }
+    Rect::new(x0 - 1.0, y0 - 1.0, x1 + 1.0, y1 + 1.0)
 }
 
 fn datos_de(doc: &PdfDocument, n: i32, xref: i32) -> Result<DatosAnotacion, String> {
@@ -1054,7 +1101,7 @@ fn anotaciones_de(doc: &PdfDocument, n: i32) -> Result<Vec<Anotacion>, String> {
     for a in pdf.annotations() {
         let Ok(Some(d)) = leer_datos(&a) else { continue };
         let Ok(xref) = a.xref() else { continue };
-        let r = a.bounds().unwrap_or(d.rect);
+        let r = d.rect;
         lista.push(Anotacion {
             pagina: n,
             xref,
@@ -1101,7 +1148,10 @@ fn palabras_de(doc: &PdfDocument, n: i32) -> Result<Vec<Palabra>, String> {
 }
 
 fn aplicar_datos(a: &mut PdfAnnotation, d: &DatosAnotacion) -> Result<(), String> {
-    a.set_rect(d.rect).map_err(texto)?;
+    // La tinta no tiene Rect en MuPDF: su caja sale de los trazos, que ya vienen movidos o escalados.
+    if d.tipo != TipoAnot::Tinta {
+        a.set_rect(d.rect).map_err(texto)?;
+    }
     match d.tipo {
         TipoAnot::Nota => {
             a.set_contents(&d.contenido).map_err(texto)?;
@@ -1227,10 +1277,59 @@ fn editar_anotacion(
     if d.tipo == TipoAnot::Nota {
         d.rect = Rect::new(d.rect.x0, d.rect.y0, (d.rect.x0 + d.tamano).min(caja.x1), (d.rect.y0 + d.tamano).min(caja.y1));
     }
-    if d.tipo == TipoAnot::Texto {
+    // El alto se recalcula solo si cambió el texto o la letra: un cambio de color no borra el tamaño elegido.
+    if d.tipo == TipoAnot::Texto && (contenido.is_some() || tamano.is_some()) {
         d.rect = ajustar_texto(d.rect, &d.contenido, d.tamano, caja);
     }
-    reemplazar_anotacion(doc, n, xref, &d)
+    // Se cambia la misma anotación: conserva su número y el panel puede seguir aplicando cambios.
+    editar_en_pagina(doc, n, xref, &d)?;
+    Ok(xref)
+}
+
+fn editar_en_pagina(doc: &mut PdfDocument, n: i32, xref: i32, d: &DatosAnotacion) -> Result<(), String> {
+    let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
+    let mut a = pdf
+        .annotations()
+        .find(|a| a.xref().ok() == Some(xref))
+        .ok_or("No se encontró la anotación.")?;
+    aplicar_datos(&mut a, d)
+}
+
+/// Cambia el tamaño de la caja (en fracción de la página). La letra y los trazos acompañan al cuadro.
+fn redimensionar_anotacion(doc: &mut PdfDocument, n: i32, xref: i32, x: f32, y: f32, w: f32, h: f32) -> Result<(), String> {
+    if !(w > 0.0) || !(h > 0.0) {
+        return Err("El tamaño no es válido.".into());
+    }
+    let pagina = doc.load_page(n).map_err(texto)?;
+    let caja = pagina.bounds().map_err(texto)?;
+    let mut d = datos_de(doc, n, xref)?;
+    if matches!(d.tipo, TipoAnot::Resaltar | TipoAnot::Subrayar | TipoAnot::Tachar) {
+        return Err("Esta anotación no se puede agrandar.".into());
+    }
+    let viejo = d.rect;
+    let ancho = (w * caja.width()).clamp(4.0, caja.width());
+    let alto = (h * caja.height()).clamp(4.0, caja.height());
+    let x0 = (caja.x0 + x.clamp(0.0, 1.0) * caja.width()).min(caja.x1 - ancho).max(caja.x0);
+    let y0 = (caja.y0 + y.clamp(0.0, 1.0) * caja.height()).min(caja.y1 - alto).max(caja.y0);
+    let nuevo = Rect::new(x0, y0, x0 + ancho, y0 + alto);
+    let sx = if viejo.width() > 0.0 { nuevo.width() / viejo.width() } else { 1.0 };
+    let sy = if viejo.height() > 0.0 { nuevo.height() / viejo.height() } else { 1.0 };
+    let factor = ((sx + sy) / 2.0).clamp(0.2, 5.0);
+    match d.tipo {
+        TipoAnot::Tinta => {
+            for trazo in &mut d.trazos {
+                for p in trazo {
+                    p.x = nuevo.x0 + (p.x - viejo.x0) * sx;
+                    p.y = nuevo.y0 + (p.y - viejo.y0) * sy;
+                }
+            }
+            d.tamano = (d.tamano * factor).clamp(0.5, 20.0);
+        }
+        TipoAnot::Texto => d.tamano = (d.tamano * factor).clamp(6.0, 72.0),
+        _ => {}
+    }
+    d.rect = nuevo;
+    editar_en_pagina(doc, n, xref, &d)
 }
 
 fn borrar_anotacion(doc: &mut PdfDocument, n: i32, xref: i32) -> Result<(), String> {

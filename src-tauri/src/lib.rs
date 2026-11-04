@@ -145,6 +145,19 @@ async fn editar_anotacion(
 }
 
 #[tauri::command]
+async fn redimensionar_anotacion(
+    motor: State<'_, Motor>,
+    pagina: i32,
+    xref: i32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+) -> Result<(), String> {
+    motor.redimensionar_anotacion(pagina, xref, x, y, w, h)
+}
+
+#[tauri::command]
 async fn borrar_anotacion(motor: State<'_, Motor>, pagina: i32, xref: i32) -> Result<(), String> {
     motor.borrar_anotacion(pagina, xref)
 }
@@ -278,6 +291,7 @@ pub fn run() {
     palabras,
     mover_anotacion,
     editar_anotacion,
+    redimensionar_anotacion,
     borrar_anotacion,
     campos,
     poner_campo,

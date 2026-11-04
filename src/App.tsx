@@ -759,6 +759,7 @@ export default function App() {
     try {
       const pagina = await invoke<number | null>('deshacer')
       if (pagina === null) return
+      setSeleccion(null)
       refrescar(pagina)
       const quedan = Math.max(0, hechas - 1)
       setHechas(quedan)
@@ -929,13 +930,40 @@ export default function App() {
       if (cambios.tamano !== undefined) args.tamano = cambios.tamano
       try {
         await invoke('editar_anotacion', args)
-        setSeleccion(null)
+        // Sigue elegida: así los cambios de color y tamaño se ven y se pueden seguir tocando.
+        setSeleccion((s) =>
+          s && s.xref === a.xref
+            ? { ...s, contenido: cambios.contenido ?? s.contenido, rojo, verde, azul, tamano: cambios.tamano ?? s.tamano }
+            : s,
+        )
         refrescar(a.pagina)
         setSucio(true)
         setHechas((h) => h + 1)
       } catch (e) {
         fallo(e)
       }
+    },
+    [refrescar, fallo],
+  )
+
+  const redimensionarAnotacion = useCallback(
+    (a: Anotacion, w: number, h: number) => {
+      // Se agranda en pantalla al instante; el motor confirma y repinta esa página.
+      setAnots((m) => ({
+        ...m,
+        [a.pagina]: (m[a.pagina] ?? []).map((x) => (x.xref === a.xref ? { ...x, w, h } : x)),
+      }))
+      setSeleccion((s) => (s && s.xref === a.xref ? { ...s, w, h } : s))
+      invoke('redimensionar_anotacion', { pagina: a.pagina, xref: a.xref, x: a.x, y: a.y, w, h })
+        .then(() => {
+          refrescar(a.pagina)
+          setSucio(true)
+          setHechas((n) => n + 1)
+        })
+        .catch((e) => {
+          fallo(e)
+          refrescar(a.pagina)
+        })
     },
     [refrescar, fallo],
   )
@@ -1568,6 +1596,7 @@ export default function App() {
                 seleccion={seleccion?.xref ?? null}
                 onSeleccionar={seleccionarAnotacion}
                 onMover={moverAnotacion}
+                onRedimensionar={redimensionarAnotacion}
                 palabras={seleccionTexto ? palabras : undefined}
               />
             )}
@@ -1660,7 +1689,8 @@ export default function App() {
             <h2 id="titulo-edicion">Edición básica de PDF</h2>
             <p>
               Puedes resaltar, subrayar, tachar, dibujar a mano, poner notas y cuadros de texto, firmar dibujando, rellenar
-              formularios y poner sellos. Toca una anotación para cambiar su texto, color o tamaño, o arrástrala para moverla.
+              formularios y poner sellos. Toca una anotación para cambiar su texto, color o tamaño, arrástrala para moverla y
+              arrastra su esquina para agrandarla.
               No se puede cambiar el texto original, las imágenes ni el diseño de la página: el PDF está hecho para leerse, no
               para editarse. Al guardar se crea una copia; el archivo original no se toca.
             </p>
@@ -1832,6 +1862,7 @@ const Paginas = memo(function Paginas({
   seleccion,
   onSeleccionar,
   onMover,
+  onRedimensionar,
   palabras,
 }: {
   doc: Doc
@@ -1851,6 +1882,7 @@ const Paginas = memo(function Paginas({
   seleccion: number | null
   onSeleccionar: (a: Anotacion) => void
   onMover: (a: Anotacion, dx: number, dy: number) => void
+  onRedimensionar: (a: Anotacion, w: number, h: number) => void
   palabras?: Record<number, Palabra[]>
 }) {
   // Alto/ancho real de las páginas ya pintadas que no miden como la primera.
@@ -1909,6 +1941,7 @@ const Paginas = memo(function Paginas({
         seleccion={seleccion}
         onSeleccionar={onSeleccionar}
         onMover={onMover}
+        onRedimensionar={onRedimensionar}
         palabras={palabras?.[n]}
       />
     )
@@ -1934,6 +1967,7 @@ const Pagina = memo(function Pagina({
   seleccion,
   onSeleccionar,
   onMover,
+  onRedimensionar,
   palabras,
 }: {
   n: number
@@ -1954,6 +1988,7 @@ const Pagina = memo(function Pagina({
   seleccion: number | null
   onSeleccionar: (a: Anotacion) => void
   onMover: (a: Anotacion, dx: number, dy: number) => void
+  onRedimensionar: (a: Anotacion, w: number, h: number) => void
   palabras?: Palabra[]
 }) {
   const url = (w: number) => `${convertFileSrc(String(n), 'pagina')}?w=${w}&d=${id}&v=${revisionTotal}-${revision}`
@@ -1995,6 +2030,7 @@ const Pagina = memo(function Pagina({
           seleccionada={seleccion === a.xref}
           onSeleccionar={onSeleccionar}
           onMover={onMover}
+          onRedimensionar={onRedimensionar}
         />
       ))}
       {resaltados?.map(({ c, i }) => (
@@ -2138,6 +2174,7 @@ function CajaAnotacion({
   seleccionada,
   onSeleccionar,
   onMover,
+  onRedimensionar,
 }: {
   a: Anotacion
   ancho: number
@@ -2145,17 +2182,25 @@ function CajaAnotacion({
   seleccionada: boolean
   onSeleccionar: (a: Anotacion) => void
   onMover: (a: Anotacion, dx: number, dy: number) => void
+  onRedimensionar: (a: Anotacion, w: number, h: number) => void
 }) {
   const inicio = useRef<{ x: number; y: number } | null>(null)
   const [desp, setDesp] = useState<{ x: number; y: number } | null>(null)
+  /** El tamaño mientras se arrastra la esquina: el estado pinta y la ref guarda el último valor. */
+  const medida = useRef<{ w: number; h: number } | null>(null)
+  const [vista, setVista] = useState<{ w: number; h: number } | null>(null)
+  // La firma y el lápiz crecen en proporción; el texto y el sello, a lo que se arrastre.
+  const enProporcion = a.tipo === 'tinta'
+  const w = vista?.w ?? a.w
+  const h = vista?.h ?? a.h
   return (
     <div
       className={seleccionada ? 'anot seleccionada' : 'anot'}
       style={{
         left: `${a.x * 100}%`,
         top: `${a.y * 100}%`,
-        width: `${a.w * 100}%`,
-        height: `${a.h * 100}%`,
+        width: `${w * 100}%`,
+        height: `${h * 100}%`,
         transform: desp ? `translate(${desp.x}px, ${desp.y}px)` : undefined,
       }}
       title={TITULOS_ANOTACION[a.tipo]}
@@ -2186,7 +2231,51 @@ function CajaAnotacion({
         inicio.current = null
         setDesp(null)
       }}
-    />
+    >
+      {seleccionada && (
+        <span
+          className="tirador"
+          title="Arrastra para agrandar o achicar"
+          onPointerDown={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            e.currentTarget.setPointerCapture(e.pointerId)
+            inicio.current = { x: e.clientX, y: e.clientY }
+            medida.current = { w: a.w, h: a.h }
+            setVista(medida.current)
+          }}
+          onPointerMove={(e) => {
+            const i = inicio.current
+            if (!i) return
+            e.stopPropagation()
+            e.preventDefault()
+            let nw = Math.min(1 - a.x, Math.max(0.02, a.w + (e.clientX - i.x) / ancho))
+            let nh = Math.min(1 - a.y, Math.max(0.02, a.h + (e.clientY - i.y) / alto))
+            if (enProporcion && a.w > 0 && a.h > 0) {
+              const k = Math.min(nw / a.w, nh / a.h)
+              nw = a.w * k
+              nh = a.h * k
+            }
+            medida.current = { w: nw, h: nh }
+            setVista(medida.current)
+          }}
+          onPointerUp={() => {
+            const i = inicio.current
+            inicio.current = null
+            if (!i) return
+            const m = medida.current
+            medida.current = null
+            setVista(null)
+            if (m && (Math.abs(m.w - a.w) > 0.005 || Math.abs(m.h - a.h) > 0.005)) onRedimensionar(a, m.w, m.h)
+          }}
+          onPointerCancel={() => {
+            inicio.current = null
+            medida.current = null
+            setVista(null)
+          }}
+        />
+      )}
+    </div>
   )
 }
 
@@ -2210,6 +2299,11 @@ function PanelAnotacion({
   const conTexto = a.tipo === 'nota' || a.tipo === 'texto'
   const colores = a.tipo === 'resaltar' ? COLORES_RESALTADO : COLORES_FUERTES
   const tamanos = a.tipo === 'texto' ? TAMANOS_TEXTO : a.tipo === 'tinta' ? GROSORES : null
+  // El texto se guarda al salir del cuadro; el color y el tamaño, al tocarlos. No hace falta "Aplicar".
+  const guardarTexto = () => {
+    const limpio = texto.trim()
+    if (conTexto && limpio && limpio !== a.contenido) onAplicar({ contenido: texto })
+  }
   return (
     <div className="fila-seleccion">
       <strong>{TITULOS_ANOTACION[a.tipo]}</strong>
@@ -2217,24 +2311,34 @@ function PanelAnotacion({
         <textarea
           value={texto}
           onChange={(e) => setTexto(e.currentTarget.value)}
+          onBlur={guardarTexto}
           placeholder={a.tipo === 'nota' ? 'Texto de la nota' : 'Texto'}
           aria-label={a.tipo === 'nota' ? 'Texto de la nota' : 'Texto'}
         />
       )}
-      <Paleta colores={colores} valor={color} onCambio={setColor} />
-      {tamanos && <Tamanos opciones={tamanos} valor={tamano} onCambio={setTamano} />}
-      <button
-        type="button"
-        disabled={conTexto && !texto.trim()}
-        onClick={() => onAplicar({ contenido: conTexto ? texto : undefined, color, tamano: tamanos ? tamano : undefined })}
-      >
-        Aplicar
+      <Paleta
+        colores={colores}
+        valor={color}
+        onCambio={(c) => {
+          setColor(c)
+          onAplicar({ color: c })
+        }}
+      />
+      {tamanos && (
+        <Tamanos
+          opciones={tamanos}
+          valor={tamano}
+          onCambio={(n) => {
+            setTamano(n)
+            onAplicar({ tamano: n })
+          }}
+        />
+      )}
+      <button type="button" onClick={() => { guardarTexto(); onCerrar() }}>
+        Cerrar
       </button>
       <button type="button" onClick={onBorrar}>
         Borrar
-      </button>
-      <button type="button" onClick={onCerrar}>
-        Cerrar
       </button>
     </div>
   )
