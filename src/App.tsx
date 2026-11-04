@@ -842,8 +842,18 @@ export default function App() {
     if (!p || !texto) return
     const [rojo, verde, azul] = rgb(colorTexto)
     try {
-      // La nota ahora es un texto visible en la página, no un ícono de comentario.
-      await invoke('anotar_caja', { pagina: p.n, x: p.x, y: p.y, contenido: texto, rojo, verde, azul, tamano: tamanoTexto })
+      // Nota y Texto ponen texto visible en la hoja; la nota lleva fondo amarillo, como un papelito pegado.
+      await invoke('anotar_caja', {
+        pagina: p.n,
+        x: p.x,
+        y: p.y,
+        contenido: texto,
+        rojo,
+        verde,
+        azul,
+        tamano: tamanoTexto,
+        postit: herramienta === 'nota',
+      })
       setTextoPedido(null)
       setTextoEntrada('')
       setHerramienta('mover')
@@ -1097,7 +1107,8 @@ export default function App() {
         if (!destino) return
       }
       const guardada = destino
-      const nombreDestino = puente?.nombre(guardada) || nombre
+      // Windows: el nombre que eligió en la ventana de guardar, no el que se le sugirió.
+      const nombreDestino = puente?.nombre(guardada) || guardada.split(/[\\/]/).pop() || nombre
       setRutaActual(guardada)
       setNombreActual(nombreDestino)
       setRecientes((lista) => guardarReciente(lista, { ruta: guardada, nombre: nombreDestino }))
