@@ -12,7 +12,7 @@
 - 0.2.5: "Abrir con" con cambios sin guardar usa un cuadro propio de la app (el aviso de Android congelaba la pantalla). David lo probó: funciona.
 - 0.2.6: todas las demás preguntas (abrir otro, quitar todo, salir con Atrás, cerrar en Windows, compartir) usan el mismo cuadro. "Salir" en Android usa `DakartaAndroid.salir()` (nuevo en `scripts/parchar-android.py`).
 - 0.2.6 también: Nota, Texto y Sello con el cuadro justo al texto (se mide con la letra Helvetica, como la dibuja MuPDF); se respetan los Enter; letra mínima 8; al agrandar con la esquina el cuadro vuelve a pegarse al texto. Botón "Mover" en la fila de herramientas.
-- Pendiente encontrado: si la PRIMERA línea de un texto empieza con mayúscula con tilde o Ñ (Á, É, Ñ…), MuPDF corta la marca de arriba. Ya pasaba antes. Falta buscar arreglo.
+- Arreglado: si la primera línea empezaba con mayúscula con tilde o Ñ (Á, É, Ñ…), MuPDF cortaba la marca de arriba. Ahora el cuadro lleva un borde invisible (trazos de largo cero) que baja el texto lo justo (`poner_borde` en `motor.rs`).
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo

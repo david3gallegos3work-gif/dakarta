@@ -947,6 +947,7 @@ fn anotar_caja(
     annot
         .set_default_appearance("Helv", tamano, Some(anotacion_color(color)))
         .map_err(texto)?;
+    poner_borde(&mut annot, tamano, rect)?;
     annot.update().map_err(texto)?;
     annot.xref().map_err(texto)
 }
@@ -978,6 +979,7 @@ fn anotar_sello(
         .set_default_appearance("Helv", tamano, Some(anotacion_color(color)))
         .map_err(texto)?;
     annot.set_quadding(AnnotationTextAlign::Center).map_err(texto)?;
+    poner_borde(&mut annot, tamano, rect)?;
     annot.update().map_err(texto)?;
     annot.xref().map_err(texto)
 }
@@ -1139,6 +1141,7 @@ fn aplicar_datos(a: &mut PdfAnnotation, d: &DatosAnotacion) -> Result<(), String
             a.set_contents(&d.contenido).map_err(texto)?;
             // El color de una FreeText se usa como relleno del cuadro: aquí solo va el color del texto.
             a.set_default_appearance("Helv", d.tamano, Some(anotacion_color(d.color))).map_err(texto)?;
+            poner_borde(a, d.tamano, d.rect)?;
         }
         TipoAnot::Tinta => {
             a.set_color(anotacion_color(d.color)).map_err(texto)?;
@@ -1216,8 +1219,19 @@ fn mover_anotacion(doc: &mut PdfDocument, n: i32, xref: i32, dx: f32, dy: f32) -
 
 /// Letra más pequeña de un texto: más chico ya no se lee ni se puede tocar con el dedo.
 const LETRA_MIN: f32 = 8.0;
-/// MuPDF dibuja el cuadro con borde de 1 y deja de margen el doble del borde: 2 × (1 + 2) por eje.
-const MARCO: f32 = 6.0;
+/// MuPDF pone la primera línea pegada al borde de arriba y corta lo que sobresale: la tilde de la Á o la
+/// virgulilla de la Ñ. Un borde invisible de este grosor baja el texto lo justo para que quepan.
+fn borde_de(tamano: f32) -> f32 {
+    (tamano * 0.14).max(1.0)
+}
+
+/// Borde invisible (trazos de largo cero) que deja sitio arriba para las tildes de las mayúsculas.
+/// MuPDF agranda la caja al cambiar el borde: se vuelve a poner la caja justa.
+fn poner_borde(a: &mut PdfAnnotation, tamano: f32, rect: Rect) -> Result<(), String> {
+    a.set_border_width(borde_de(tamano)).map_err(texto)?;
+    a.set_border_dash_pattern(&[0.0, 1000.0]).map_err(texto)?;
+    a.set_rect(rect).map_err(texto)
+}
 
 fn ancho_de(fuente: &Font, s: &str, tamano: f32) -> f32 {
     let em: f32 = s
@@ -1231,7 +1245,9 @@ fn ancho_de(fuente: &Font, s: &str, tamano: f32) -> f32 {
 /// espacios, igual que MuPDF al dibujarlo, para no pasar de `max_ancho`; los Enter se respetan.
 fn medida_texto(contenido: &str, tamano: f32, max_ancho: f32) -> Result<(f32, f32), String> {
     let fuente = Font::new("Helvetica").map_err(texto)?;
-    let limite = (max_ancho - MARCO).max(tamano);
+    // MuPDF deja de margen el doble del borde, a cada lado: 4 bordes por eje.
+    let marco = 4.0 * borde_de(tamano);
+    let limite = (max_ancho - marco).max(tamano);
     let (mut ancho, mut lineas) = (0.0f32, 0u32);
     for parrafo in contenido.lines() {
         let mut actual = String::new();
@@ -1250,7 +1266,7 @@ fn medida_texto(contenido: &str, tamano: f32, max_ancho: f32) -> Result<(f32, f3
     }
     let lineas = lineas.max(1) as f32;
     // Un poco de holgura: así MuPDF nunca corta una línea que aquí sí cupo.
-    Ok((ancho + MARCO + 2.0, tamano + (lineas - 1.0) * tamano * 1.2 + MARCO + 1.0))
+    Ok((ancho + marco + 2.0, tamano + (lineas - 1.0) * tamano * 1.2 + marco + 1.0))
 }
 
 /// Cuadro pegado al texto con su esquina en (x0, y0), sin salirse de la hoja.
