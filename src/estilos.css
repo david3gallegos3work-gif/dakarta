@@ -182,3 +182,30 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .noche .editar .pista { color: #90caf9; }
 .noche .campo { border-color: #90caf9; background: rgba(144, 202, 249, 0.15); color: #e3f2fd; }
 .noche .campo.protegido { border-color: #666; background: rgba(255, 255, 255, 0.06); color: #aaa; }
+.panel-acerca { width: min(420px, 100%); border: 1px solid #cfd8e3; border-radius: 10px; background: #f5f8fc; text-align: left; }
+.panel-acerca summary { padding: 12px 14px; font-weight: 600; cursor: pointer; }
+.panel-acerca .acerca { padding: 0 14px 14px; }
+.acerca { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.acerca p { margin: 0; }
+.acerca h3 { margin: 6px 0 0; font-size: 15px; }
+.acerca-estado { color: #666; font-size: 14px; }
+.acerca-estado.al-dia { color: #2e7d32; }
+.acerca-nueva { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: #e3f2fd; color: #0d47a1; font-size: 14px; }
+.acerca-nueva span { flex: 1; }
+.acerca-nueva .grande { min-height: 36px; padding: 0 12px; border: 0; border-radius: 6px; background: #1565c0; color: #fff; font: inherit; cursor: pointer; }
+.acerca-apps { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.acerca-apps li { display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 12px; border: 1px solid #cfd8e3; border-radius: 8px; background: #fff; }
+.acerca-apps span { flex: 1; }
+.acerca-apps button { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border: 0; border-radius: 6px; background: none; color: #455a64; cursor: pointer; }
+.acerca-apps button:hover { background: #e3f2fd; }
+.acerca-apps svg { width: 22px; height: 22px; }
+.acerca-enlace { align-self: flex-start; padding: 4px 0; border: 0; background: none; color: #1565c0; font: inherit; text-decoration: underline; cursor: pointer; }
+.indice .version-indice { margin: 8px 8px 4px; width: calc(100% - 16px); border: 1px solid #cfd8e3; border-radius: 6px; color: #455a64; font-size: 14px; }
+.noche .panel-acerca { background: #242424; border-color: #3a3a3a; }
+.noche .acerca-apps li { background: #2f2f2f; border-color: #3a3a3a; }
+.noche .acerca-apps button { color: #ccc; }
+.noche .acerca-estado { color: #bbb; }
+.noche .acerca-estado.al-dia { color: #81c784; }
+.noche .acerca-nueva { background: #0d47a1; color: #e3f2fd; }
+.noche .acerca-enlace { color: #90caf9; }
+.noche .indice .version-indice { border-color: #3a3a3a; color: #bbb; }
