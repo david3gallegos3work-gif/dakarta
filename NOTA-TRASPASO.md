@@ -2,7 +2,7 @@
 
 **Fecha y lugar:** 2026-11-03 22:20, en la PC. Actualizada el 2026-11-04 (Ecuador) desde la nube.
 **IA y aparato:** Claude Code. Revisión en la PC; arreglos en la nube.
-**Rama:** `main` (versión 0.2.12).
+**Rama:** `main` (versión 0.2.13).
 
 ## Hecho en la nube (2026-11-03 y 2026-11-04)
 
@@ -19,6 +19,7 @@
 - 0.2.10: hallazgos 5 a 10 arreglados (ver lista) y mensaje más claro cuando el PDF no trae índice lateral. Pruebas del motor: 16.
 - 0.2.11: en un grupo de opciones (F/M), al elegir una las demás seguían viéndose marcadas (MuPDF solo cambia la que se toca). `apagar_las_demas` en `motor.rs`.
 - 0.2.12: hallazgos 11 y 14 cerrados. La Nota es un texto con fondo amarillo tipo post-it (`postit` en `anotar_caja`); Texto va sin fondo. Se quitó `anotar_nota` (sin uso). En Windows se muestra el nombre elegido al guardar. David confirmó las tres decisiones de `AGENTS.md` y se quitó de `CLAUDE.md` la sección "Revisar lo que hizo otra IA" (revisión terminada). Pruebas del motor: 17.
+- 0.2.13: al editar el texto de una nota, texto o sello, la hoja se actualiza mientras se escribe (en cada pausa de 350 ms), no solo al tocar fuera. Lo escrito de un tirón es un solo paso de deshacer (`junto` en `editar_anotacion`). Pruebas del motor: 18.
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo
