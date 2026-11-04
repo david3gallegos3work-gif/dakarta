@@ -97,6 +97,17 @@ pub struct Anotacion {
     h: f32,
 }
 
+/// Palabra del texto del PDF, para poder seleccionarla y copiarla como en un lector normal.
+#[derive(Serialize)]
+pub struct Palabra {
+    texto: String,
+    /// Caja en fracción de la página (0 a 1).
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+}
+
 /// Lo que se guarda para poder deshacer un cambio en una anotación.
 #[derive(Clone)]
 struct DatosAnotacion {
@@ -235,6 +246,7 @@ enum Pedido {
         resp: Sender<Result<(), String>>,
     },
     Anotaciones { n: i32, resp: Sender<Result<Vec<Anotacion>, String>> },
+    Palabras { n: i32, resp: Sender<Result<Vec<Palabra>, String>> },
     Mover { n: i32, xref: i32, dx: f32, dy: f32, resp: Sender<Result<(), String>> },
     Editar {
         n: i32,
@@ -354,12 +366,22 @@ impl Motor {
                             };
                             let _ = resp.send(r);
                         }
+                        Pedido::Palabras { n, resp } => {
+                            let r = match &abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => palabras_de(doc, n),
+                            };
+                            let _ = resp.send(r);
+                        }
                         Pedido::Mover { n, xref, dx, dy, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
                                 Some((doc, _)) => datos_de(doc, n, xref).and_then(|antes| {
-                                    mover_anotacion(doc, n, xref, dx, dy).map(|()| {
-                                        hechas.push(Hecho::Cambio { n, xref, antes });
+                                    mover_anotacion(doc, n, xref, dx, dy).map(|nuevo| {
+                                        for h in hechas.iter_mut() {
+                                            h.cambiar_xref(xref, nuevo);
+                                        }
+                                        hechas.push(Hecho::Cambio { n, xref: nuevo, antes });
                                         cache.olvidar_pagina(n);
                                     })
                                 }),
@@ -370,8 +392,11 @@ impl Motor {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
                                 Some((doc, _)) => datos_de(doc, n, xref).and_then(|antes| {
-                                    editar_anotacion(doc, n, xref, contenido.as_deref(), color, tamano).map(|()| {
-                                        hechas.push(Hecho::Cambio { n, xref, antes });
+                                    editar_anotacion(doc, n, xref, contenido.as_deref(), color, tamano).map(|nuevo| {
+                                        for h in hechas.iter_mut() {
+                                            h.cambiar_xref(xref, nuevo);
+                                        }
+                                        hechas.push(Hecho::Cambio { n, xref: nuevo, antes });
                                         cache.olvidar_pagina(n);
                                     })
                                 }),
@@ -556,6 +581,12 @@ impl Motor {
         rx.recv().map_err(texto)?
     }
 
+    pub fn palabras(&self, n: i32) -> Result<Vec<Palabra>, String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Palabras { n, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
     pub fn mover_anotacion(&self, n: i32, xref: i32, dx: f32, dy: f32) -> Result<(), String> {
         let (tx, rx) = mpsc::channel();
         self.0.send(Pedido::Mover { n, xref, dx, dy, resp: tx }).map_err(texto)?;
@@ -732,38 +763,50 @@ fn anotar_texto(
     if palabras.is_empty() {
         return Err("Este PDF no tiene texto para resaltar. Puedes dibujar a mano.".into());
     }
-    // Franja vertical del arrastre; un toque sin mover selecciona la línea que toca.
+    // Solo las palabras que toca el dedo: un toque elige una; un arrastre elige las que cruza.
+    let x0 = caja.x0 + a.0.min(b.0) * caja.width();
+    let x1 = caja.x0 + a.0.max(b.0) * caja.width();
+    let y0 = caja.y0 + a.1.min(b.1) * caja.height();
+    let y1 = caja.y0 + a.1.max(b.1) * caja.height();
     let margen = (caja.height() * 0.005).max(1.0);
-    let y0 = caja.y0 + a.1.min(b.1) * caja.height() - margen;
-    let y1 = caja.y0 + a.1.max(b.1) * caja.height() + margen;
-    let mut lineas: std::collections::BTreeMap<(usize, usize), Rect> = std::collections::BTreeMap::new();
-    for p in &palabras {
-        let r = p.bounds;
-        if r.y1 < y0 || r.y0 > y1 {
-            continue;
-        }
-        lineas
-            .entry((p.block, p.line))
-            .and_modify(|u| {
-                u.x0 = u.x0.min(r.x0);
-                u.y0 = u.y0.min(r.y0);
-                u.x1 = u.x1.max(r.x1);
-                u.y1 = u.y1.max(r.y1);
+    let toque = (x1 - x0) < 3.0 && (y1 - y0) < 3.0;
+    let quad = |r: Rect| Quad {
+        ul: Point { x: r.x0, y: r.y0 },
+        ur: Point { x: r.x1, y: r.y0 },
+        ll: Point { x: r.x0, y: r.y1 },
+        lr: Point { x: r.x1, y: r.y1 },
+    };
+    let mut quads: Vec<Quad> = palabras
+        .iter()
+        .map(|p| p.bounds)
+        .filter(|r| {
+            if toque {
+                r.x0 - margen <= x0 && x0 <= r.x1 + margen && r.y0 - margen <= y0 && y0 <= r.y1 + margen
+            } else {
+                r.x1 >= x0 && r.x0 <= x1 && r.y1 >= y0 - margen && r.y0 <= y1 + margen
+            }
+        })
+        .map(|r| quad(r))
+        .collect();
+    // Un toque justo entre dos palabras elige la más cercana de esa línea.
+    if toque && quads.is_empty() {
+        let cercana = palabras
+            .iter()
+            .filter(|p| y0 >= p.bounds.y0 - margen && y0 <= p.bounds.y1 + margen)
+            .map(|p| {
+                let r = p.bounds;
+                let distancia = if x0 < r.x0 { r.x0 - x0 } else if x0 > r.x1 { x0 - r.x1 } else { 0.0 };
+                (distancia, r)
             })
-            .or_insert(r);
+            .filter(|(distancia, _)| *distancia <= 20.0)
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        if let Some((_, r)) = cercana {
+            quads.push(quad(r));
+        }
     }
-    if lineas.is_empty() {
+    if quads.is_empty() {
         return Err("No se encontró texto en lo que seleccionaste.".into());
     }
-    let quads: Vec<Quad> = lineas
-        .values()
-        .map(|r| Quad {
-            ul: Point { x: r.x0, y: r.y0 },
-            ur: Point { x: r.x1, y: r.y0 },
-            ll: Point { x: r.x0, y: r.y1 },
-            lr: Point { x: r.x1, y: r.y1 },
-        })
-        .collect();
     let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
     let mut annot = match tipo {
         TipoTexto::Resaltar => pdf.add_highlight_annotation(quads),
@@ -1029,6 +1072,33 @@ fn anotaciones_de(doc: &PdfDocument, n: i32) -> Result<Vec<Anotacion>, String> {
     Ok(lista)
 }
 
+/// Palabras de una página con su caja, para la capa que permite seleccionar y copiar.
+fn palabras_de(doc: &PdfDocument, n: i32) -> Result<Vec<Palabra>, String> {
+    let pagina = doc.load_page(n).map_err(texto)?;
+    let caja = pagina.bounds().map_err(texto)?;
+    if caja.width() <= 0.0 || caja.height() <= 0.0 {
+        return Ok(Vec::new());
+    }
+    let palabras = pagina.words(TextExtractOptions::default()).map_err(texto)?;
+    let mut lista = Vec::with_capacity(palabras.len());
+    for (i, p) in palabras.iter().enumerate() {
+        if p.text.is_empty() {
+            continue;
+        }
+        let fin_linea = palabras.get(i + 1).map_or(true, |s| s.block != p.block || s.line != p.line);
+        let r = p.bounds;
+        lista.push(Palabra {
+            // El espacio o el salto de línea hacen que al copiar quede separado.
+            texto: format!("{}{}", p.text, if fin_linea { "\n" } else { " " }),
+            x: ((r.x0 - caja.x0) / caja.width()).clamp(0.0, 1.0),
+            y: ((r.y0 - caja.y0) / caja.height()).clamp(0.0, 1.0),
+            w: ((r.x1 - r.x0) / caja.width()).clamp(0.0, 1.0),
+            h: ((r.y1 - r.y0) / caja.height()).clamp(0.0, 1.0),
+        });
+    }
+    Ok(lista)
+}
+
 fn aplicar_datos(a: &mut PdfAnnotation, d: &DatosAnotacion) -> Result<(), String> {
     a.set_rect(d.rect).map_err(texto)?;
     match d.tipo {
@@ -1076,11 +1146,22 @@ fn crear_anotacion(doc: &mut PdfDocument, n: i32, d: &DatosAnotacion) -> Result<
     a.xref().map_err(texto)
 }
 
+/// Cambia una anotación por una nueva con los mismos datos, ya corregida.
+/// Así también se arreglan las que quedaron dañadas por versiones anteriores.
+fn reemplazar_anotacion(doc: &mut PdfDocument, n: i32, xref: i32, d: &DatosAnotacion) -> Result<i32, String> {
+    let nuevo = crear_anotacion(doc, n, d)?;
+    if let Err(e) = borrar_anotacion(doc, n, xref) {
+        let _ = borrar_anotacion(doc, n, nuevo);
+        return Err(e);
+    }
+    Ok(nuevo)
+}
+
 fn fijar(v: f32, min: f32, max: f32) -> f32 {
     if min > max { v } else { v.clamp(min, max) }
 }
 
-fn mover_anotacion(doc: &mut PdfDocument, n: i32, xref: i32, dx: f32, dy: f32) -> Result<(), String> {
+fn mover_anotacion(doc: &mut PdfDocument, n: i32, xref: i32, dx: f32, dy: f32) -> Result<i32, String> {
     let pagina = doc.load_page(n).map_err(texto)?;
     let caja = pagina.bounds().map_err(texto)?;
     let mut d = datos_de(doc, n, xref)?;
@@ -1103,12 +1184,7 @@ fn mover_anotacion(doc: &mut PdfDocument, n: i32, xref: i32, dx: f32, dy: f32) -
             }
         }
     }
-    let pdf = doc.load_pdf_page(n).map_err(texto)?;
-    let mut a = pdf
-        .annotations()
-        .find(|a| a.xref().ok() == Some(xref))
-        .ok_or("No se encontró la anotación.")?;
-    aplicar_datos(&mut a, &d)
+    reemplazar_anotacion(doc, n, xref, &d)
 }
 
 fn ajustar_texto(rect: Rect, contenido: &str, tamano: f32, caja: Rect) -> Rect {
@@ -1125,7 +1201,7 @@ fn editar_anotacion(
     contenido: Option<&str>,
     color: Option<(f32, f32, f32)>,
     tamano: Option<f32>,
-) -> Result<(), String> {
+) -> Result<i32, String> {
     let pagina = doc.load_page(n).map_err(texto)?;
     let caja = pagina.bounds().map_err(texto)?;
     let mut d = datos_de(doc, n, xref)?;
@@ -1155,12 +1231,7 @@ fn editar_anotacion(
     if d.tipo == TipoAnot::Texto {
         d.rect = ajustar_texto(d.rect, &d.contenido, d.tamano, caja);
     }
-    let pdf = doc.load_pdf_page(n).map_err(texto)?;
-    let mut a = pdf
-        .annotations()
-        .find(|a| a.xref().ok() == Some(xref))
-        .ok_or("No se encontró la anotación.")?;
-    aplicar_datos(&mut a, &d)
+    reemplazar_anotacion(doc, n, xref, &d)
 }
 
 fn borrar_anotacion(doc: &mut PdfDocument, n: i32, xref: i32) -> Result<(), String> {
@@ -1203,9 +1274,9 @@ fn deshacer_hecho(doc: &mut PdfDocument, hecho: Hecho, hechas: &mut Vec<Hecho>) 
     match hecho {
         Hecho::Anotacion { n, xref } => borrar_anotacion(doc, n, xref),
         Hecho::Cambio { n, xref, antes } => {
-            let pdf = doc.load_pdf_page(n).map_err(texto)?;
-            if let Some(mut a) = pdf.annotations().find(|a| a.xref().ok() == Some(xref)) {
-                aplicar_datos(&mut a, &antes)?;
+            let nuevo = reemplazar_anotacion(doc, n, xref, &antes)?;
+            for h in hechas.iter_mut() {
+                h.cambiar_xref(xref, nuevo);
             }
             Ok(())
         }

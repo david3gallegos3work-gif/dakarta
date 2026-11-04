@@ -63,6 +63,14 @@ type Campo = {
   w: number
   h: number
 }
+/** Palabra del PDF para la capa de texto que permite seleccionar y copiar. */
+type Palabra = {
+  texto: string
+  x: number
+  y: number
+  w: number
+  h: number
+}
 /** Anotación propia que se puede tocar para mover, cambiar o borrar. */
 type Anotacion = {
   pagina: number
@@ -234,6 +242,8 @@ export default function App() {
   const [revisionTotal, setRevisionTotal] = useState(0)
   const [anots, setAnots] = useState<Record<number, Anotacion[]>>({})
   const [seleccion, setSeleccion] = useState<Anotacion | null>(null)
+  const [seleccionTexto, setSeleccionTexto] = useState(false)
+  const [palabras, setPalabras] = useState<Record<number, Palabra[]>>({})
   const [campoPedido, setCampoPedido] = useState<{ campo: Campo; valor: string } | null>(null)
   const [sucio, setSucio] = useState(false)
   const [hechas, setHechas] = useState(0)
@@ -269,6 +279,8 @@ export default function App() {
     puntos: [number, number][]
   } | null>(null)
   const padActual = useRef<[number, number][] | null>(null)
+  /** Último texto seleccionado: al tocar "Copiar" el navegador puede haber quitado la selección. */
+  const textoSeleccionado = useRef('')
   const avisoVisto = useRef(false)
   const sucioRef = useRef(sucio)
   const editandoRef = useRef(editando)
@@ -297,6 +309,15 @@ export default function App() {
     try {
       const lista = await invoke<Anotacion[]>('anotaciones', { pagina: n })
       setAnots((m) => ({ ...m, [n]: lista }))
+    } catch (e) {
+      console.error(e)
+    }
+  }, [])
+
+  const cargarPalabras = useCallback(async (n: number) => {
+    try {
+      const lista = await invoke<Palabra[]>('palabras', { pagina: n })
+      setPalabras((m) => ({ ...m, [n]: lista }))
     } catch (e) {
       console.error(e)
     }
@@ -544,6 +565,16 @@ export default function App() {
     }
   }, [noche])
 
+  // Se guarda lo último seleccionado: al tocar el botón Copiar la selección puede desaparecer antes.
+  useEffect(() => {
+    const al = () => {
+      const t = window.getSelection()?.toString() ?? ''
+      if (t.trim()) textoSeleccionado.current = t
+    }
+    document.addEventListener('selectionchange', al)
+    return () => document.removeEventListener('selectionchange', al)
+  }, [])
+
   const ir = useCallback(
     (n: number) => {
       const el = hijos()[n]
@@ -624,6 +655,9 @@ export default function App() {
         setPreview(null)
         setSeleccion(null)
         setAnots({})
+        setSeleccionTexto(false)
+        setPalabras({})
+        textoSeleccionado.current = ''
         setRevisiones({})
         setRevisionTotal(0)
         avisoVisto.current = false
@@ -681,6 +715,9 @@ export default function App() {
 
   const entrarEditar = () => {
     setEditando(true)
+    if (seleccionTexto) window.getSelection()?.removeAllRanges()
+    textoSeleccionado.current = ''
+    setSeleccionTexto(false)
     setHerramienta('mover')
     setSeleccion(null)
     setAyudaManual(false)
@@ -847,10 +884,33 @@ export default function App() {
     if (p) await ponerValorCampo(p.campo, p.valor)
   }
 
+  const copiarSeleccion = async () => {
+    const actual = window.getSelection()?.toString() ?? ''
+    const texto = (actual.trim() ? actual : textoSeleccionado.current).trim()
+    if (!texto) {
+      setExito('Primero selecciona el texto que quieres copiar.')
+      return
+    }
+    try {
+      if (!navigator.clipboard) throw new Error('sin portapapeles')
+      await navigator.clipboard.writeText(texto)
+    } catch {
+      const area = document.createElement('textarea')
+      area.value = texto
+      document.body.appendChild(area)
+      area.select()
+      document.execCommand('copy')
+      area.remove()
+    }
+    setExito('Texto copiado')
+  }
+
   const seleccionarAnotacion = useCallback((a: Anotacion) => setSeleccion(a), [])
 
   const moverAnotacion = useCallback(
     (a: Anotacion, dx: number, dy: number) => {
+      // Al moverla se vuelve a crear con otro número: el panel ya no sirve para ella.
+      setSeleccion((s) => (s?.xref === a.xref ? null : s))
       // Se mueve en pantalla al instante; el motor confirma y repinta esa página.
       setAnots((m) => ({
         ...m,
@@ -988,6 +1048,15 @@ export default function App() {
     }
   }, [editando, doc, visibles, anots, cargarAnotaciones])
 
+  // Al seleccionar texto, se piden las palabras de las páginas que se ven.
+  useEffect(() => {
+    if (!seleccionTexto || !doc) return
+    const [a, b] = visibles
+    for (let n = Math.max(0, a - 1); n <= Math.min(doc.info.paginas - 1, b + 1); n++) {
+      if (!(n in palabras)) void cargarPalabras(n)
+    }
+  }, [seleccionTexto, doc, visibles, palabras, cargarPalabras])
+
   // El botón o gesto "atrás" de Android cierra primero el panel o la búsqueda; si no hay nada abierto, sale.
   useEffect(() => {
     window.DakartaAtras = () => {
@@ -1102,6 +1171,26 @@ export default function App() {
             >
               🔍
             </button>
+            {!editando && (
+              <button
+                onClick={() => {
+                  cerrarBuscar()
+                  setVerIndice(false)
+                  if (seleccionTexto) {
+                    window.getSelection()?.removeAllRanges()
+                    textoSeleccionado.current = ''
+                  }
+                  setSeleccionTexto(!seleccionTexto)
+                }}
+                aria-pressed={seleccionTexto}
+                aria-label="Seleccionar texto"
+                title="Seleccionar texto para copiar"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 6V4h14v2M12 4v16M8 20h8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            )}
             <button
               onClick={() => (editando ? salirEditar() : entrarEditar())}
               aria-pressed={editando}
@@ -1197,7 +1286,23 @@ export default function App() {
         </div>
       )}
 
-      {editando && doc && (
+      {seleccionTexto && doc && !editando && (
+        <div className="seleccion-texto">
+          <span>Mantén presionado o arrastra sobre el texto. Luego toca Copiar. En escaneos no hay texto.</span>
+          <button onClick={copiarSeleccion}>Copiar</button>
+          <button
+            onClick={() => {
+              window.getSelection()?.removeAllRanges()
+              textoSeleccionado.current = ''
+              setSeleccionTexto(false)
+            }}
+          >
+            Cerrar
+          </button>
+        </div>
+      )}
+
+      {editando && doc && !verIndice && (
         <div className="editar">
           <div className="fila-herramientas">
             <button onClick={deshacer} disabled={!hechas} aria-label="Deshacer" title="Deshacer">
@@ -1475,6 +1580,7 @@ export default function App() {
                 seleccion={seleccion?.xref ?? null}
                 onSeleccionar={seleccionarAnotacion}
                 onMover={moverAnotacion}
+                palabras={seleccionTexto ? palabras : undefined}
               />
             )}
             {preview && (
@@ -1738,6 +1844,7 @@ const Paginas = memo(function Paginas({
   seleccion,
   onSeleccionar,
   onMover,
+  palabras,
 }: {
   doc: Doc
   ancho: number
@@ -1756,6 +1863,7 @@ const Paginas = memo(function Paginas({
   seleccion: number | null
   onSeleccionar: (a: Anotacion) => void
   onMover: (a: Anotacion, dx: number, dy: number) => void
+  palabras?: Record<number, Palabra[]>
 }) {
   // Alto/ancho real de las páginas ya pintadas que no miden como la primera.
   const [prop, setProp] = useState<Record<number, number>>({})
@@ -1813,6 +1921,7 @@ const Paginas = memo(function Paginas({
         seleccion={seleccion}
         onSeleccionar={onSeleccionar}
         onMover={onMover}
+        palabras={palabras?.[n]}
       />
     )
   })
@@ -1837,6 +1946,7 @@ const Pagina = memo(function Pagina({
   seleccion,
   onSeleccionar,
   onMover,
+  palabras,
 }: {
   n: number
   id: number
@@ -1856,6 +1966,7 @@ const Pagina = memo(function Pagina({
   seleccion: number | null
   onSeleccionar: (a: Anotacion) => void
   onMover: (a: Anotacion, dx: number, dy: number) => void
+  palabras?: Palabra[]
 }) {
   const url = (w: number) => `${convertFileSrc(String(n), 'pagina')}?w=${w}&d=${id}&v=${revisionTotal}-${revision}`
   return (
@@ -1872,6 +1983,21 @@ const Pagina = memo(function Pagina({
       )}
       {nitida > 0 && <Imagen src={url(nitida)} alCargar={(real) => medida(n, real)} />}
       {recorte && <Detalle r={recorte} id={id} revision={revision} revisionTotal={revisionTotal} />}
+      {palabras?.map((p, i) => (
+        <span
+          key={i}
+          className="texto-pdf"
+          style={{
+            left: `${p.x * 100}%`,
+            top: `${p.y * 100}%`,
+            width: `${p.w * 100}%`,
+            height: `${p.h * 100}%`,
+            fontSize: `${p.h * alto}px`,
+          }}
+        >
+          {p.texto}
+        </span>
+      ))}
       {anots?.map((a) => (
         <CajaAnotacion
           key={a.xref}
@@ -2090,7 +2216,9 @@ function PanelAnotacion({
 }) {
   const [texto, setTexto] = useState(a.contenido)
   const [color, setColor] = useState(hex(a.rojo, a.verde, a.azul))
-  const [tamano, setTamano] = useState(a.tamano)
+  const [tamano, setTamano] = useState(
+    a.tamano || (a.tipo === 'nota' ? 40 : a.tipo === 'texto' ? 12 : 3),
+  )
   const conTexto = a.tipo === 'nota' || a.tipo === 'texto'
   const colores =
     a.tipo === 'nota' ? COLORES_NOTA : a.tipo === 'resaltar' ? COLORES_RESALTADO : COLORES_FUERTES
