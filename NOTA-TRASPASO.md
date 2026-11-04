@@ -15,6 +15,8 @@
 - Arreglado: si la primera línea empezaba con mayúscula con tilde o Ñ (Á, É, Ñ…), MuPDF cortaba la marca de arriba. Ahora el cuadro lleva un borde invisible (trazos de largo cero) que baja el texto lo justo (`poner_borde` en `motor.rs`).
 - David probó la 0.2.6: todo bien. Con el PDF de prueba vio el formulario doble (la casilla repetía el valor que ya dibuja la página). 0.2.7: la casilla queda solo como marco.
 - 0.2.8: recuadro "Dakarta · versión y descargas" (`src/AcercaDe.tsx`): en el inicio y al final del panel ☰. Versión instalada, si hay nueva, enlaces fijos del APK y .exe (copiar/descargar) y página de descargas. Sin versión web (Dakarta no tiene).
+- 0.2.9: los enlaces internos del PDF (el índice impreso de Word) se pueden tocar para saltar (`enlaces_de` en `motor.rs`). Las capas de la hoja ya no pasan por encima del panel ☰ (`isolation` en `.visor`). La manija izquierda de la selección: margen de recorte en `.texto-pdf` (por comprobar en el celular).
+- Idea pendiente (A): mensaje más claro cuando el PDF no trae marcadores.
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo

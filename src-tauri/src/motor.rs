@@ -108,6 +108,17 @@ pub struct Palabra {
     h: f32,
 }
 
+/// Enlace interno del PDF (por ejemplo, una línea del índice de Word): su caja y la página a la que lleva.
+#[derive(Serialize)]
+pub struct Enlace {
+    pagina: i32,
+    /// Caja en fracción de la página (0 a 1).
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+}
+
 /// Lo que se guarda para poder deshacer un cambio en una anotación.
 #[derive(Clone)]
 struct DatosAnotacion {
@@ -255,6 +266,7 @@ enum Pedido {
     },
     Anotaciones { n: i32, resp: Sender<Result<Vec<Anotacion>, String>> },
     Palabras { n: i32, resp: Sender<Result<Vec<Palabra>, String>> },
+    Enlaces { n: i32, resp: Sender<Result<Vec<Enlace>, String>> },
     Mover { n: i32, xref: i32, dx: f32, dy: f32, resp: Sender<Result<(), String>> },
     Editar {
         n: i32,
@@ -380,6 +392,13 @@ impl Motor {
                             let r = match &abierto {
                                 None => Err("No hay un documento abierto".into()),
                                 Some((doc, _)) => palabras_de(doc, n),
+                            };
+                            let _ = resp.send(r);
+                        }
+                        Pedido::Enlaces { n, resp } => {
+                            let r = match &abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => enlaces_de(doc, n),
                             };
                             let _ = resp.send(r);
                         }
@@ -608,6 +627,12 @@ impl Motor {
     pub fn palabras(&self, n: i32) -> Result<Vec<Palabra>, String> {
         let (tx, rx) = mpsc::channel();
         self.0.send(Pedido::Palabras { n, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
+    pub fn enlaces(&self, n: i32) -> Result<Vec<Enlace>, String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Enlaces { n, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
@@ -1091,6 +1116,33 @@ fn anotaciones_de(doc: &PdfDocument, n: i32) -> Result<Vec<Anotacion>, String> {
             verde: d.color.1,
             azul: d.color.2,
             tamano: d.tamano,
+            x: ((r.x0 - caja.x0) / caja.width()).clamp(0.0, 1.0),
+            y: ((r.y0 - caja.y0) / caja.height()).clamp(0.0, 1.0),
+            w: ((r.x1 - r.x0) / caja.width()).clamp(0.0, 1.0),
+            h: ((r.y1 - r.y0) / caja.height()).clamp(0.0, 1.0),
+        });
+    }
+    Ok(lista)
+}
+
+/// Enlaces de una página que llevan a otra página del mismo PDF. Los que van a internet se ignoran.
+fn enlaces_de(doc: &PdfDocument, n: i32) -> Result<Vec<Enlace>, String> {
+    let pagina = doc.load_page(n).map_err(texto)?;
+    let caja = pagina.bounds().map_err(texto)?;
+    if caja.width() <= 0.0 || caja.height() <= 0.0 {
+        return Ok(Vec::new());
+    }
+    let total = doc.page_count().map_err(texto)?;
+    let mut lista = Vec::new();
+    for l in pagina.links().map_err(texto)? {
+        let Some(d) = l.dest else { continue };
+        let destino = d.loc.page_number as i32;
+        if destino < 0 || destino >= total {
+            continue;
+        }
+        let r = l.bounds;
+        lista.push(Enlace {
+            pagina: destino,
             x: ((r.x0 - caja.x0) / caja.width()).clamp(0.0, 1.0),
             y: ((r.y0 - caja.y0) / caja.height()).clamp(0.0, 1.0),
             w: ((r.x1 - r.x0) / caja.width()).clamp(0.0, 1.0),
@@ -1589,6 +1641,30 @@ mod pruebas {
         assert_eq!(PdfDocument::open(&copia).unwrap().page_count().unwrap(), 1);
 
         std::fs::remove_dir_all(&carpeta).unwrap();
+    }
+
+    #[test]
+    fn un_enlace_del_indice_lleva_a_su_pagina() {
+        // PDF mínimo: la página 1 tiene un enlace (como una línea del índice) que lleva a la página 3.
+        let pdf = "%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R 4 0 R 5 0 R]/Count 3>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 300]/Annots[6 0 R 7 0 R]>>endobj
+4 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 300]>>endobj
+5 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 300]>>endobj
+6 0 obj<</Type/Annot/Subtype/Link/Rect[20 250 180 270]/Dest[5 0 R/Fit]>>endobj
+7 0 obj<</Type/Annot/Subtype/Link/Rect[20 200 180 220]/A<</S/URI/URI(https://example.com)>>>>endobj
+trailer<</Root 1 0 R>>
+%%EOF";
+        let ruta = std::env::temp_dir().join(format!("dakarta-enlaces-{}.pdf", std::process::id()));
+        std::fs::write(&ruta, pdf).unwrap();
+        let doc = PdfDocument::open(ruta.to_str().unwrap()).unwrap();
+        let lista = enlaces_de(&doc, 0).unwrap();
+        std::fs::remove_file(&ruta).unwrap();
+        assert_eq!(lista.len(), 1);
+        assert_eq!(lista[0].pagina, 2);
+        // Arriba de la hoja: y = (300 - 270) / 300.
+        assert!((lista[0].y - 0.1).abs() < 0.01 && (lista[0].x - 0.1).abs() < 0.01);
     }
 
     #[test]
