@@ -1292,7 +1292,7 @@ fn editar_anotacion(
 }
 
 fn editar_en_pagina(doc: &mut PdfDocument, n: i32, xref: i32, d: &DatosAnotacion) -> Result<(), String> {
-    let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
+    let pdf = doc.load_pdf_page(n).map_err(texto)?;
     let mut a = pdf
         .annotations()
         .find(|a| a.xref().ok() == Some(xref))
