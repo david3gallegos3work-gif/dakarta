@@ -2518,6 +2518,9 @@ function PanelAnotacion({
   // tamaño, al tocarlos. No hace falta "Aplicar". Todo lo escrito de un tirón es un solo paso de deshacer.
   const guardado = useRef(a.contenido)
   const enTanda = useRef(false)
+  // El teclado del celular arma cada palabra antes de soltarla: guardar a mitad de palabra le hacía cerrarla
+  // y aplicar su corrección (una N sola se volvía Ñ). Se espera a que termine la palabra.
+  const componiendo = useRef(false)
   const reloj = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => () => clearTimeout(reloj.current), [])
   const guardar = (valor: string) => {
@@ -2538,11 +2541,22 @@ function PanelAnotacion({
       {conTexto && (
         <textarea
           value={texto}
+          autoCorrect="off"
+          onCompositionStart={() => {
+            componiendo.current = true
+            clearTimeout(reloj.current)
+          }}
+          onCompositionEnd={(e) => {
+            componiendo.current = false
+            const valor = e.currentTarget.value
+            clearTimeout(reloj.current)
+            reloj.current = setTimeout(() => guardar(valor), 350)
+          }}
           onChange={(e) => {
             const valor = e.currentTarget.value
             setTexto(valor)
             clearTimeout(reloj.current)
-            reloj.current = setTimeout(() => guardar(valor), 350)
+            if (!componiendo.current) reloj.current = setTimeout(() => guardar(valor), 350)
           }}
           onBlur={guardarTexto}
           placeholder={a.tipo === 'nota' ? 'Texto de la nota' : 'Texto'}
