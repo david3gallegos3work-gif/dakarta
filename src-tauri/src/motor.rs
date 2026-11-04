@@ -22,12 +22,15 @@ mod anotar;
 mod busqueda;
 mod capas;
 mod formulario;
+mod organizar;
 mod pintar;
 
 use anotar::*;
 use busqueda::*;
 use capas::*;
 use formulario::*;
+use organizar::organizar_y_guardar;
+pub use organizar::Hoja;
 use pintar::*;
 
 #[derive(Serialize)]
@@ -293,7 +296,8 @@ enum Pedido {
     DeshacerTodo { resp: Sender<Result<bool, String>> },
     Campos { resp: Sender<Result<Vec<Campo>, String>> },
     Campo { n: i32, xref: i32, valor: String, resp: Sender<Result<(), String>> },
-    Guardar { destino: String, resp: Sender<Result<(), String>> },
+    /// Con `hojas`, guarda un PDF nuevo con esas hojas en ese orden (organizar o extraer páginas).
+    Guardar { destino: String, hojas: Option<Vec<Hoja>>, resp: Sender<Result<(), String>> },
 }
 
 /// MuPDF no se comparte entre hilos: un solo hilo guarda el documento y atiende los pedidos.
@@ -518,14 +522,18 @@ impl Motor {
                             };
                             let _ = resp.send(r);
                         }
-                        Pedido::Guardar { destino, resp } => {
+                        Pedido::Guardar { destino, hojas, resp } => {
                             let r = match &abierto {
                                 None => Err("No hay un documento abierto".into()),
                                 // Lo guardado queda como punto de partida: ya no se deshace.
                                 Some(_) if mismo_archivo(&ruta_abierta, &destino) => Err(
                                     "No se puede guardar encima del PDF abierto. Elige otro nombre.".into(),
                                 ),
-                                Some((doc, _)) => guardar_doc(doc, &destino).map(|()| hechas.clear()),
+                                // Organizar no cambia el PDF abierto: sus cambios siguen pudiendo deshacerse.
+                                Some((doc, _)) => match &hojas {
+                                    Some(h) => organizar_y_guardar(doc, h, &destino),
+                                    None => guardar_doc(doc, &destino).map(|()| hechas.clear()),
+                                },
                             };
                             let _ = resp.send(r);
                         }
@@ -736,9 +744,9 @@ impl Motor {
         rx.recv().map_err(texto)?
     }
 
-    pub fn guardar(&self, destino: String) -> Result<(), String> {
+    pub fn guardar(&self, destino: String, hojas: Option<Vec<Hoja>>) -> Result<(), String> {
         let (tx, rx) = mpsc::channel();
-        self.0.send(Pedido::Guardar { destino, resp: tx }).map_err(texto)?;
+        self.0.send(Pedido::Guardar { destino, hojas, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
