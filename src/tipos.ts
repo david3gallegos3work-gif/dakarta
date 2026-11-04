@@ -102,3 +102,6 @@ export type Preview = {
   y1: number
   puntos: [number, number][]
 }
+
+/** Una hoja del PDF que se guarda al organizar: de qué página sale y cuánto se gira (múltiplo de 90). */
+export type Hoja = { pagina: number; giro: number }

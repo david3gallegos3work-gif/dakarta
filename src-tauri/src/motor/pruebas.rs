@@ -247,3 +247,86 @@ fn un_texto_nuevo_y_al_agrandarlo_el_cuadro_sigue_al_texto() {
     assert!((d.tamano - 24.0).abs() < 0.5, "letra {}", d.tamano);
     assert!((d.rect.width() - medida_texto("Texto", d.tamano, 270.0).unwrap().0).abs() < 0.5);
 }
+
+/// PDF de prueba con `n` hojas; cada una dice "hoja N". El tamaño está en la raíz y lo heredan las hojas.
+fn pdf_numerado(n: usize) -> String {
+    let mut objs = vec![
+        "<</Type/Catalog/Pages 2 0 R>>".to_string(),
+        String::new(),
+        "<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>".to_string(),
+    ];
+    let mut kids = Vec::new();
+    for i in 0..n {
+        let contenido = format!("BT /F1 12 Tf 20 100 Td (hoja {}) Tj ET", i + 1);
+        objs.push(format!("<</Length {}>>stream\n{}\nendstream", contenido.len(), contenido));
+        let c = objs.len();
+        objs.push(format!("<</Type/Page/Parent 2 0 R/Resources<</Font<</F1 3 0 R>>>>/Contents {c} 0 R>>"));
+        kids.push(format!("{} 0 R", objs.len()));
+    }
+    objs[1] = format!("<</Type/Pages/Kids[{}]/Count {n}/MediaBox[0 0 200 300]>>", kids.join(" "));
+    let mut pdf = String::from("%PDF-1.4\n");
+    for (i, o) in objs.iter().enumerate() {
+        pdf.push_str(&format!("{} 0 obj{}endobj\n", i + 1, o));
+    }
+    pdf.push_str("trailer<</Root 1 0 R>>\n%%EOF");
+    pdf
+}
+
+#[test]
+fn organizar_mueve_gira_quita_y_duplica_sin_tocar_el_abierto() {
+    let carpeta = std::env::temp_dir().join(format!("dakarta-organizar-{}", std::process::id()));
+    std::fs::create_dir_all(&carpeta).unwrap();
+    let origen = carpeta.join("tesis.pdf");
+    std::fs::write(&origen, pdf_numerado(4)).unwrap();
+    let destino = carpeta.join("organizado.pdf").to_string_lossy().into_owned();
+    let mut doc = PdfDocument::open(origen.to_str().unwrap()).unwrap();
+    // Una nota sin guardar en la hoja 2: debe ir con su hoja (y con la copia).
+    anotar_caja(&mut doc, 1, 0.1, 0.1, "Ojo", (0.0, 0.0, 0.0), 12.0, true).unwrap();
+    let hojas = [
+        Hoja { pagina: 3, giro: 90 },
+        Hoja { pagina: 1, giro: 0 },
+        Hoja { pagina: 1, giro: 0 },
+        Hoja { pagina: 0, giro: -90 },
+    ];
+    organizar_y_guardar(&doc, &hojas, &destino).unwrap();
+    assert_eq!(doc.page_count().unwrap(), 4, "el PDF abierto no cambia");
+    assert!(!std::path::Path::new(&format!("{destino}.organizando")).exists());
+
+    let nuevo = PdfDocument::open(&destino).unwrap();
+    assert_eq!(nuevo.page_count().unwrap(), 4);
+    let textos: Vec<String> = (0..4)
+        .map(|i| nuevo.load_page(i).unwrap().text(TextExtractOptions::default()).unwrap().trim().to_string())
+        .collect();
+    assert_eq!(textos, ["hoja 4", "hoja 2", "hoja 2", "hoja 1"]);
+    let giros: Vec<i32> = (0..4).map(|i| nuevo.load_pdf_page(i).unwrap().rotation().unwrap()).collect();
+    assert_eq!(giros, [90, 0, 0, 270]);
+    let notas: Vec<usize> = (0..4).map(|i| nuevo.load_pdf_page(i).unwrap().annotations().count()).collect();
+    assert_eq!(notas, [0, 1, 1, 0]);
+    // La hoja heredaba su tamaño: sigue midiendo lo mismo.
+    let b = nuevo.load_page(1).unwrap().bounds().unwrap();
+    assert!((b.width() - 200.0).abs() < 0.5 && (b.height() - 300.0).abs() < 0.5);
+    std::fs::remove_dir_all(&carpeta).unwrap();
+}
+
+#[test]
+fn organizar_rechaza_una_lista_vacia_o_con_paginas_que_no_existen() {
+    let doc = doc_de(300.0, 400.0);
+    assert!(organizar_y_guardar(&doc, &[], "/tmp/no-se-usa.pdf").is_err());
+    assert!(organizar_y_guardar(&doc, &[Hoja { pagina: 5, giro: 0 }], "/tmp/no-se-usa.pdf").is_err());
+}
+
+#[test]
+fn duplicar_una_hoja_con_formulario_no_duplica_las_casillas() {
+    let ruta = concat!(env!("CARGO_MANIFEST_DIR"), "/pruebas/formulario.pdf");
+    let doc = PdfDocument::open(ruta).unwrap();
+    let destino = std::env::temp_dir().join(format!("dakarta-dup-form-{}.pdf", std::process::id()));
+    let destino = destino.to_string_lossy().into_owned();
+    organizar_y_guardar(&doc, &[Hoja { pagina: 0, giro: 0 }, Hoja { pagina: 0, giro: 0 }], &destino).unwrap();
+    let mut nuevo = PdfDocument::open(&destino).unwrap();
+    assert_eq!(nuevo.page_count().unwrap(), 2);
+    assert!(nuevo.load_pdf_page(0).unwrap().widgets().count() > 0);
+    assert_eq!(nuevo.load_pdf_page(1).unwrap().widgets().count(), 0);
+    let acepto = campos_doc(&nuevo).unwrap().into_iter().find(|c| c.nombre == "acepto").unwrap();
+    fijar_campo(&mut nuevo, 0, acepto.xref, &acepto.encendido).unwrap();
+    std::fs::remove_file(&destino).unwrap();
+}
