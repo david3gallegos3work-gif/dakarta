@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Dakarta",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "identifier": "io.github.dakarta",
   "build": {
     "frontendDist": "../dist",
