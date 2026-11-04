@@ -281,6 +281,7 @@ impl Motor {
         std::thread::spawn(move || {
             // En Android el archivo viaja con el documento: si se cerrara, MuPDF perdería el acceso.
             let mut abierto: Option<(PdfDocument, Option<File>)> = None;
+            let mut ruta_abierta = String::new();
             // Anotaciones y campos cambiados en esta sesión, para deshacer.
             let mut hechas: Vec<Hecho> = Vec::new();
             let mut pendientes: Vec<PedidoPagina> = Vec::new();
@@ -300,6 +301,7 @@ impl Motor {
                         Pedido::Abrir { ruta, archivo, resp } => {
                             let r = abrir_doc(&ruta).map(|(doc, info)| {
                                 abierto = Some((doc, archivo));
+                                ruta_abierta = ruta;
                                 hechas.clear();
                                 cache.vaciar();
                                 // Lo que faltaba del documento anterior ya nadie lo está esperando.
@@ -480,6 +482,9 @@ impl Motor {
                             let r = match &abierto {
                                 None => Err("No hay un documento abierto".into()),
                                 // Lo guardado queda como punto de partida: ya no se deshace.
+                                Some(_) if mismo_archivo(&ruta_abierta, &destino) => Err(
+                                    "No se puede guardar encima del PDF abierto. Elige otro nombre.".into(),
+                                ),
                                 Some((doc, _)) => guardar_doc(doc, &destino).map(|()| hechas.clear()),
                             };
                             let _ = resp.send(r);
@@ -972,8 +977,8 @@ fn anotar_sello(
     // El recuadro queda pegado a la etiqueta; se puede agrandar arrastrando su esquina.
     let ancho = fijar(etiqueta.chars().count() as f32 * tamano * 0.62 + 20.0, 60.0, caja.width() * 0.9);
     let alto = fijar(tamano * 1.5 + 12.0, 30.0, caja.height() * 0.2);
-    let x0 = (caja.x0 + x.clamp(0.0, 1.0) * caja.width() - ancho / 2.0).clamp(caja.x0, caja.x1 - ancho);
-    let y0 = (caja.y0 + y.clamp(0.0, 1.0) * caja.height() - alto / 2.0).clamp(caja.y0, caja.y1 - alto);
+    let x0 = (caja.x0 + x.clamp(0.0, 1.0) * caja.width() - ancho / 2.0).min(caja.x1 - ancho).max(caja.x0);
+    let y0 = (caja.y0 + y.clamp(0.0, 1.0) * caja.height() - alto / 2.0).min(caja.y1 - alto).max(caja.y0);
     let rect = Rect::new(x0, y0, x0 + ancho, y0 + alto);
     let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
     let mut annot = pdf.add_free_text_annotation(rect, etiqueta).map_err(texto)?;
@@ -1287,7 +1292,7 @@ fn editar_anotacion(
 }
 
 fn editar_en_pagina(doc: &mut PdfDocument, n: i32, xref: i32, d: &DatosAnotacion) -> Result<(), String> {
-    let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
+    let pdf = doc.load_pdf_page(n).map_err(texto)?;
     let mut a = pdf
         .annotations()
         .find(|a| a.xref().ok() == Some(xref))
@@ -1436,10 +1441,28 @@ fn fijar_campo(doc: &mut PdfDocument, n: i32, xref: i32, valor: &str) -> Result<
     Ok(anterior)
 }
 
+/// Se escribe primero a un archivo aparte y solo al terminar reemplaza al destino:
+/// si algo falla a medias, el archivo que ya existía queda intacto.
 fn guardar_doc(doc: &PdfDocument, destino: &str) -> Result<(), String> {
     let mut opciones = PdfWriteOptions::default();
     opciones.set_compress(true);
-    doc.save_with_options(destino, opciones).map_err(texto)
+    let temporal = format!("{destino}.guardando");
+    let r = doc
+        .save_with_options(&temporal, opciones)
+        .map_err(texto)
+        .and_then(|()| std::fs::rename(&temporal, destino).map_err(texto));
+    if r.is_err() {
+        let _ = std::fs::remove_file(&temporal);
+    }
+    r
+}
+
+/// El PDF abierto se sigue leyendo mientras se guarda: escribir encima lo dañaría.
+fn mismo_archivo(abierto: &str, destino: &str) -> bool {
+    match (std::fs::canonicalize(abierto), std::fs::canonicalize(destino)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 
 fn pintar(doc: &Document, n: i32, ancho: u32) -> Result<Vec<u8>, String> {
@@ -1498,4 +1521,43 @@ fn respuesta(r: Result<Vec<u8>, String>) -> Response<Vec<u8>> {
 
 fn texto(e: impl Display) -> String {
     e.to_string()
+}
+
+#[cfg(test)]
+mod pruebas {
+    use super::*;
+
+    fn doc_de(ancho: f32, alto: f32) -> PdfDocument {
+        let mut doc = PdfDocument::new();
+        doc.new_page((ancho, alto)).unwrap();
+        doc
+    }
+
+    #[test]
+    fn un_sello_en_una_hoja_muy_pequena_no_detiene_el_motor() {
+        let mut doc = doc_de(40.0, 20.0);
+        assert!(anotar_sello(&mut doc, 0, 0.5, 0.5, "APROBADO", (1.0, 0.0, 0.0), 40.0).is_ok());
+    }
+
+    #[test]
+    fn no_se_guarda_encima_del_pdf_abierto_y_lo_guardado_se_vuelve_a_abrir() {
+        let carpeta = std::env::temp_dir().join(format!("dakarta-prueba-{}", std::process::id()));
+        std::fs::create_dir_all(&carpeta).unwrap();
+        let original = carpeta.join("original.pdf").to_string_lossy().into_owned();
+        let copia = carpeta.join("copia.pdf").to_string_lossy().into_owned();
+
+        guardar_doc(&doc_de(300.0, 400.0), &original).unwrap();
+        assert!(mismo_archivo(&original, &original));
+        assert!(!mismo_archivo(&original, &copia));
+
+        let mut doc = PdfDocument::open(&original).unwrap();
+        anotar_sello(&mut doc, 0, 0.5, 0.5, "PAGADO", (0.0, 0.5, 0.0), 24.0).unwrap();
+        guardar_doc(&doc, &copia).unwrap();
+        // Guardar otra vez reemplaza la copia sin dejar el archivo temporal.
+        guardar_doc(&doc, &copia).unwrap();
+        assert!(!std::path::Path::new(&format!("{copia}.guardando")).exists());
+        assert_eq!(PdfDocument::open(&copia).unwrap().page_count().unwrap(), 1);
+
+        std::fs::remove_dir_all(&carpeta).unwrap();
+    }
 }
