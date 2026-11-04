@@ -132,12 +132,13 @@ async fn editar_anotacion(
     verde: Option<f32>,
     azul: Option<f32>,
     tamano: Option<f32>,
-) -> Result<(), String> {
+    junto: Option<bool>,
+) -> Result<bool, String> {
     let color = match (rojo, verde, azul) {
         (Some(r), Some(g), Some(b)) => Some((r, g, b)),
         _ => None,
     };
-    motor.editar_anotacion(pagina, xref, contenido, color, tamano)
+    motor.editar_anotacion(pagina, xref, contenido, color, tamano, junto.unwrap_or(false))
 }
 
 #[tauri::command]
