@@ -18,6 +18,7 @@ declare global {
       guardar?(nombre: string): void
       destino?(): string | null
       copiar?(destino: string, origen: string): boolean
+      borrar?(destino: string): void
       salir?(): void
     }
     /** Android: el botón o gesto "atrás" pregunta si la pantalla lo usó o si toca salir. */
@@ -63,6 +64,8 @@ type Campo = {
   nombre: string
   valor: string
   readonly: boolean
+  /** Casillas: el valor que las deja marcadas en este PDF ("Off" es desmarcada). */
+  encendido: string
   x: number
   y: number
   w: number
@@ -617,6 +620,8 @@ export default function App() {
 
   const cerrarBuscar = useCallback(() => {
     pedidoBusqueda.current++
+    // Si seguía buscando en un PDF grande, el motor deja de hacerlo y vuelve a pintar páginas.
+    invoke('cancelar_busqueda').catch(() => {})
     setVerBuscar(false)
     setBusqueda(null)
     setBuscando(false)
@@ -906,8 +911,13 @@ export default function App() {
         setError('Este campo está protegido y no se puede cambiar.')
         return
       }
-      if (/button|checkbox|radio/i.test(c.tipo)) {
-        void ponerValorCampo(c, c.valor && c.valor !== 'Off' ? 'Off' : 'Yes')
+      if (c.tipo === 'Checkbox') {
+        void ponerValorCampo(c, c.valor === c.encendido ? 'Off' : c.encendido)
+        return
+      }
+      // Una opción se marca; ya marcada se queda así (se cambia eligiendo otra del mismo grupo).
+      if (c.tipo === 'RadioButton') {
+        if (c.valor !== c.encendido) void ponerValorCampo(c, c.encendido)
         return
       }
       setCampoPedido({ campo: c, valor: c.valor })
@@ -1074,8 +1084,13 @@ export default function App() {
       if (puente?.guardar && puente.copiar) {
         destino = await esperarDestino(nombre)
         if (!destino) return
-        const cache = await invoke<string>('guardar_en_cache')
-        if (!puente.copiar(destino, cache)) throw new Error('No se pudo copiar la copia.')
+        const elegido = destino
+        // Si el motor no logra escribir la copia, el archivo vacío que se creó en el destino no se queda.
+        const cache = await invoke<string>('guardar_en_cache').catch((e) => {
+          puente.borrar?.(elegido)
+          throw e
+        })
+        if (!puente.copiar(destino, cache)) throw new Error('No se pudo guardar la copia.')
         puente.persistir(destino)
       } else {
         destino = await invoke<string | null>('guardar_copia', { nombre })
@@ -1574,7 +1589,7 @@ export default function App() {
                 }}
               />
             ) : (
-              <p>Este documento no tiene índice.</p>
+              <p>Este PDF no trae índice lateral. Si tiene una página de índice al inicio, toca sus líneas: si traen enlace, te llevan a esa página.</p>
             )}
             <button className="version-indice" onClick={() => setVerAcerca(true)}>
               Dakarta · versión y descargas
@@ -2488,9 +2503,14 @@ function PanelAnotacion({
   const colores = a.tipo === 'resaltar' ? COLORES_RESALTADO : COLORES_FUERTES
   const tamanos = a.tipo === 'texto' ? TAMANOS_TEXTO : a.tipo === 'tinta' ? GROSORES : null
   // El texto se guarda al salir del cuadro; el color y el tamaño, al tocarlos. No hace falta "Aplicar".
+  // Se recuerda lo último guardado: al tocar "Cerrar" el cuadro ya guardó al perder el foco, y no debe
+  // quedar un segundo paso de deshacer con el mismo texto.
+  const guardado = useRef(a.contenido)
   const guardarTexto = () => {
     const limpio = texto.trim()
-    if (conTexto && limpio && limpio !== a.contenido) onAplicar({ contenido: texto })
+    if (!conTexto || !limpio || limpio === guardado.current.trim()) return
+    guardado.current = texto
+    onAplicar({ contenido: texto })
   }
   return (
     <div className="fila-seleccion">

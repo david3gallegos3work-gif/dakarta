@@ -6,6 +6,7 @@ use std::time::Instant;
 use mupdf::color::AnnotationColor;
 use mupdf::pdf::annotation::{AnnotationTextAlign, PdfAnnotation, PdfAnnotationType};
 use mupdf::pdf::document::{PdfDocument, PdfWriteOptions};
+use mupdf::pdf::WidgetType;
 use mupdf::point::Point;
 use mupdf::quad::Quad;
 use mupdf::rect::Rect;
@@ -71,6 +72,9 @@ pub struct Campo {
     nombre: String,
     valor: String,
     readonly: bool,
+    /// Casillas de marcar y de opción: el valor que las deja marcadas. Cada PDF elige el suyo
+    /// ("Yes", "On", "1", "F"…); "Off" es siempre desmarcada. Vacío en los demás campos.
+    encendido: String,
     /// Caja del campo, en fracción de la página (0 a 1).
     x: f32,
     y: f32,
@@ -187,6 +191,7 @@ enum TipoTexto {
 }
 
 /// Lo que se puede deshacer en esta sesión.
+#[derive(Clone)]
 enum Hecho {
     Anotacion { n: i32, xref: i32 },
     /// La anotación se movió o se le cambió el texto, el color o el tamaño.
@@ -212,6 +217,7 @@ impl Hecho {
 enum Pedido {
     Abrir { ruta: String, archivo: Option<File>, resp: Sender<Result<Info, String>> },
     Buscar { texto: String, resp: Sender<Result<Busqueda, String>> },
+    CancelarBusqueda,
     Pagina(PedidoPagina),
     Texto {
         n: i32,
@@ -297,10 +303,11 @@ impl Motor {
             // Anotaciones y campos cambiados en esta sesión, para deshacer.
             let mut hechas: Vec<Hecho> = Vec::new();
             let mut pendientes: Vec<PedidoPagina> = Vec::new();
+            let mut busqueda: Option<BusquedaEnCurso> = None;
             let mut cache = Cache::nuevo(TOPE_CACHE);
             loop {
                 // Sin trabajo se espera; con trabajo solo se recoge lo que ya llegó.
-                let primero = if pendientes.is_empty() {
+                let primero = if pendientes.is_empty() && busqueda.is_none() {
                     match rx.recv() {
                         Ok(p) => Some(p),
                         Err(_) => return,
@@ -311,6 +318,9 @@ impl Motor {
                 for pedido in primero.into_iter().chain(rx.try_iter()) {
                     match pedido {
                         Pedido::Abrir { ruta, archivo, resp } => {
+                            if let Some(b) = busqueda.take() {
+                                b.cancelar();
+                            }
                             let r = abrir_doc(&ruta).map(|(doc, info)| {
                                 abierto = Some((doc, archivo));
                                 ruta_abierta = ruta;
@@ -325,11 +335,20 @@ impl Motor {
                             let _ = resp.send(r);
                         }
                         Pedido::Buscar { texto, resp } => {
-                            let r = match &abierto {
-                                None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => buscar_doc(doc, &texto),
-                            };
-                            let _ = resp.send(r);
+                            if let Some(b) = busqueda.take() {
+                                b.cancelar();
+                            }
+                            match BusquedaEnCurso::nueva(&texto, resp) {
+                                Ok(b) => busqueda = Some(b),
+                                Err((e, resp)) => {
+                                    let _ = resp.send(Err(e));
+                                }
+                            }
+                        }
+                        Pedido::CancelarBusqueda => {
+                            if let Some(b) = busqueda.take() {
+                                b.cancelar();
+                            }
                         }
                         Pedido::Texto { n, tipo, color, a, b, resp } => {
                             let r = match &mut abierto {
@@ -511,6 +530,29 @@ impl Motor {
                         Pedido::Pagina(p) => pendientes.push(p),
                     }
                 }
+                // La búsqueda avanza solo cuando no hay páginas esperando: lo que se ve va primero.
+                if pendientes.is_empty() {
+                    if let Some(b) = busqueda.as_mut() {
+                        let r = match &abierto {
+                            None => Err("No hay un documento abierto".into()),
+                            Some((doc, _)) => b.avanzar(doc),
+                        };
+                        match r {
+                            Ok(false) => {}
+                            Ok(true) => {
+                                if let Some(b) = busqueda.take() {
+                                    b.terminar();
+                                }
+                            }
+                            Err(e) => {
+                                if let Some(b) = busqueda.take() {
+                                    let _ = b.resp.send(Err(e));
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
                 // Primero lo más reciente (lo que se está mirando): recortes, luego hojas enteras, luego miniaturas.
                 let Some(i) = pendientes
                     .iter()
@@ -557,6 +599,10 @@ impl Motor {
         let (tx, rx) = mpsc::channel();
         self.0.send(Pedido::Buscar { texto: aguja, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
+    }
+
+    pub fn cancelar_busqueda(&self) {
+        let _ = self.0.send(Pedido::CancelarBusqueda);
     }
 
     pub fn anotar_texto(
@@ -753,46 +799,74 @@ fn entradas(o: &[Outline]) -> Vec<Entrada> {
 }
 
 /// Busca en todas las páginas. Las cajas vuelven en fracción de la página, para pintarlas encima sin depender del zoom.
-fn buscar_doc(doc: &Document, aguja: &str) -> Result<Busqueda, String> {
-    let aguja = aguja.trim();
-    if aguja.is_empty() {
-        return Err("Escribe qué buscar.".into());
+/// Búsqueda que avanza de a pocas páginas: entre una tanda y otra el motor sigue pintando lo que se ve,
+/// y una búsqueda nueva o cerrar el buscador la cancela.
+struct BusquedaEnCurso {
+    aguja: String,
+    siguiente: i32,
+    resultados: Vec<Coincidencia>,
+    tiene_texto: bool,
+    truncada: bool,
+    resp: Sender<Result<Busqueda, String>>,
+}
+
+/// Páginas que se miran por tanda: pocas, para que una página pedida no espere casi nada.
+const PAGINAS_POR_TANDA: i32 = 4;
+
+impl BusquedaEnCurso {
+    fn nueva(aguja: &str, resp: Sender<Result<Busqueda, String>>) -> Result<Self, (String, Sender<Result<Busqueda, String>>)> {
+        let aguja = aguja.trim();
+        if aguja.is_empty() {
+            return Err(("Escribe qué buscar.".into(), resp));
+        }
+        Ok(Self { aguja: aguja.to_string(), siguiente: 0, resultados: Vec::new(), tiene_texto: false, truncada: false, resp })
     }
-    let paginas = doc.page_count().map_err(texto)?;
-    let mut resultados = Vec::new();
-    let mut tiene_texto = false;
-    let mut truncada = false;
-    'paginas: for n in 0..paginas {
-        let pagina = doc.load_page(n).map_err(texto)?;
-        let b = pagina.bounds().map_err(texto)?;
-        if b.width() <= 0.0 || b.height() <= 0.0 {
-            continue;
-        }
-        // Solo se mira si hay texto mientras no se haya encontrado: el aviso de escaneado no cuesta en PDFs normales.
-        if !tiene_texto {
-            tiene_texto = !pagina.text(TextExtractOptions::default()).map_err(texto)?.trim().is_empty();
-        }
-        let quads = pagina.search(aguja, 500).map_err(texto)?;
-        for q in quads.iter() {
-            if resultados.len() >= TOPE_RESULTADOS {
-                truncada = true;
-                break 'paginas;
+
+    /// Mira la siguiente tanda de páginas. Devuelve true cuando ya terminó.
+    fn avanzar(&mut self, doc: &Document) -> Result<bool, String> {
+        let paginas = doc.page_count().map_err(texto)?;
+        let fin = (self.siguiente + PAGINAS_POR_TANDA).min(paginas);
+        while self.siguiente < fin {
+            let n = self.siguiente;
+            self.siguiente += 1;
+            let pagina = doc.load_page(n).map_err(texto)?;
+            let b = pagina.bounds().map_err(texto)?;
+            if b.width() <= 0.0 || b.height() <= 0.0 {
+                continue;
             }
-            let x0 = q.ul.x.min(q.ll.x).min(q.ur.x).min(q.lr.x);
-            let x1 = q.ul.x.max(q.ll.x).max(q.ur.x).max(q.lr.x);
-            let y0 = q.ul.y.min(q.ll.y).min(q.ur.y).min(q.lr.y);
-            let y1 = q.ul.y.max(q.ll.y).max(q.ur.y).max(q.lr.y);
-            resultados.push(Coincidencia {
-                pagina: n,
-                x: ((x0 - b.x0) / b.width()).clamp(0.0, 1.0),
-                y: ((y0 - b.y0) / b.height()).clamp(0.0, 1.0),
-                w: ((x1 - x0) / b.width()).clamp(0.0, 1.0),
-                h: ((y1 - y0) / b.height()).clamp(0.0, 1.0),
-            });
+            // Solo se mira si hay texto mientras no se haya encontrado: el aviso de escaneado no cuesta en PDFs normales.
+            if !self.tiene_texto {
+                self.tiene_texto = !pagina.text(TextExtractOptions::default()).map_err(texto)?.trim().is_empty();
+            }
+            for q in pagina.search(&self.aguja, 500).map_err(texto)?.iter() {
+                if self.resultados.len() >= TOPE_RESULTADOS {
+                    self.truncada = true;
+                    return Ok(true);
+                }
+                let x0 = q.ul.x.min(q.ll.x).min(q.ur.x).min(q.lr.x);
+                let x1 = q.ul.x.max(q.ll.x).max(q.ur.x).max(q.lr.x);
+                let y0 = q.ul.y.min(q.ll.y).min(q.ur.y).min(q.lr.y);
+                let y1 = q.ul.y.max(q.ll.y).max(q.ur.y).max(q.lr.y);
+                self.resultados.push(Coincidencia {
+                    pagina: n,
+                    x: ((x0 - b.x0) / b.width()).clamp(0.0, 1.0),
+                    y: ((y0 - b.y0) / b.height()).clamp(0.0, 1.0),
+                    w: ((x1 - x0) / b.width()).clamp(0.0, 1.0),
+                    h: ((y1 - y0) / b.height()).clamp(0.0, 1.0),
+                });
+            }
         }
+        Ok(self.siguiente >= paginas)
     }
-    let escaneado = resultados.is_empty() && !tiene_texto;
-    Ok(Busqueda { resultados, escaneado, truncada })
+
+    fn terminar(self) {
+        let escaneado = self.resultados.is_empty() && !self.tiene_texto;
+        let _ = self.resp.send(Ok(Busqueda { resultados: self.resultados, escaneado, truncada: self.truncada }));
+    }
+
+    fn cancelar(self) {
+        let _ = self.resp.send(Err("Búsqueda cancelada".into()));
+    }
 }
 
 fn anotacion_color((rojo, verde, azul): (f32, f32, f32)) -> AnnotationColor {
@@ -1228,17 +1302,6 @@ fn crear_anotacion(doc: &mut PdfDocument, n: i32, d: &DatosAnotacion) -> Result<
     a.xref().map_err(texto)
 }
 
-/// Cambia una anotación por una nueva con los mismos datos, ya corregida.
-/// Así también se arreglan las que quedaron dañadas por versiones anteriores.
-fn reemplazar_anotacion(doc: &mut PdfDocument, n: i32, xref: i32, d: &DatosAnotacion) -> Result<i32, String> {
-    let nuevo = crear_anotacion(doc, n, d)?;
-    if let Err(e) = borrar_anotacion(doc, n, xref) {
-        let _ = borrar_anotacion(doc, n, nuevo);
-        return Err(e);
-    }
-    Ok(nuevo)
-}
-
 fn fijar(v: f32, min: f32, max: f32) -> f32 {
     if min > max { v } else { v.clamp(min, max) }
 }
@@ -1266,7 +1329,19 @@ fn mover_anotacion(doc: &mut PdfDocument, n: i32, xref: i32, dx: f32, dy: f32) -
             }
         }
     }
-    reemplazar_anotacion(doc, n, xref, &d)
+    // Se mueve la misma anotación: conserva su letra, su autor, el centrado del sello y lo demás.
+    let pdf = doc.load_pdf_page(n).map_err(texto)?;
+    let mut a = pdf
+        .annotations()
+        .find(|a| a.xref().ok() == Some(xref))
+        .ok_or("No se encontró la anotación.")?;
+    match d.tipo {
+        TipoAnot::Tinta => a.set_ink_list(d.trazos.clone()).map_err(texto)?,
+        TipoAnot::Resaltar | TipoAnot::Subrayar | TipoAnot::Tachar => a.set_quad_points(d.quads.clone()).map_err(texto)?,
+        TipoAnot::Nota | TipoAnot::Texto => a.set_rect(d.rect).map_err(texto)?,
+    }
+    a.update().map_err(texto)?;
+    Ok(xref)
 }
 
 /// Letra más pequeña de un texto: más chico ya no se lee ni se puede tocar con el dedo.
@@ -1430,11 +1505,13 @@ fn borrar_anotacion(doc: &mut PdfDocument, n: i32, xref: i32) -> Result<(), Stri
 
 /// Deshace el último cambio de esta sesión y devuelve la página que hay que volver a pintar.
 fn deshacer(doc: &mut PdfDocument, hechas: &mut Vec<Hecho>) -> Result<Option<i32>, String> {
-    let Some(hecho) = hechas.pop() else {
+    // Si deshacer falla, el paso se queda en la lista: se puede volver a intentar y el contador no se descuadra.
+    let Some(hecho) = hechas.last().cloned() else {
         return Ok(None);
     };
     let n = pagina_de(&hecho);
     deshacer_hecho(doc, hecho, hechas)?;
+    hechas.pop();
     Ok(Some(n))
 }
 
@@ -1443,8 +1520,9 @@ fn deshacer_todo(doc: &mut PdfDocument, hechas: &mut Vec<Hecho>) -> Result<bool,
     if hechas.is_empty() {
         return Ok(false);
     }
-    while let Some(hecho) = hechas.pop() {
+    while let Some(hecho) = hechas.last().cloned() {
         deshacer_hecho(doc, hecho, hechas)?;
+        hechas.pop();
     }
     Ok(true)
 }
@@ -1458,13 +1536,8 @@ fn pagina_de(hecho: &Hecho) -> i32 {
 fn deshacer_hecho(doc: &mut PdfDocument, hecho: Hecho, hechas: &mut Vec<Hecho>) -> Result<(), String> {
     match hecho {
         Hecho::Anotacion { n, xref } => borrar_anotacion(doc, n, xref),
-        Hecho::Cambio { n, xref, antes } => {
-            let nuevo = reemplazar_anotacion(doc, n, xref, &antes)?;
-            for h in hechas.iter_mut() {
-                h.cambiar_xref(xref, nuevo);
-            }
-            Ok(())
-        }
+        // Se devuelve la misma anotación a como estaba: no se rehace ni cambia de número.
+        Hecho::Cambio { n, xref, antes } => editar_en_pagina(doc, n, xref, &antes),
         Hecho::Borrada { n, xref, datos } => {
             let nuevo = crear_anotacion(doc, n, &datos)?;
             // Las acciones anteriores apuntan al número viejo: ahora es este.
@@ -1475,6 +1548,24 @@ fn deshacer_hecho(doc: &mut PdfDocument, hecho: Hecho, hechas: &mut Vec<Hecho>) 
         }
         Hecho::Campo { n, xref, anterior } => fijar_campo(doc, n, xref, &anterior).map(|_| ()),
     }
+}
+
+/// El nombre del estado "marcada" de una casilla: el que no es "Off" entre sus apariencias (/AP /N).
+fn valor_encendido(a: &PdfAnnotation) -> String {
+    let leer = || -> Result<Option<String>, mupdf::Error> {
+        let Some(ap) = a.object().get_dict("AP")? else { return Ok(None) };
+        let Some(normal) = ap.get_dict("N")? else { return Ok(None) };
+        for i in 0..normal.dict_len()? as i32 {
+            if let Some(k) = normal.get_dict_key(i)? {
+                let nombre = String::from_utf8_lossy(&k.as_name()?).into_owned();
+                if nombre != "Off" {
+                    return Ok(Some(nombre));
+                }
+            }
+        }
+        Ok(None)
+    };
+    leer().ok().flatten().unwrap_or_else(|| "Yes".into())
 }
 
 /// Todos los campos de formulario del documento, con su caja en fracción de la página.
@@ -1489,14 +1580,25 @@ fn campos_doc(doc: &PdfDocument) -> Result<Vec<Campo>, String> {
         }
         let pdf = doc.load_pdf_page(n).map_err(texto)?;
         for w in pdf.widgets() {
+            let tipo = w.r#type().map_err(texto)?;
+            // Los botones de acción (Imprimir, Enviar…) no guardan ningún valor: no se pueden llenar.
+            if tipo == WidgetType::Button {
+                continue;
+            }
+            let encendido = if matches!(tipo, WidgetType::Checkbox | WidgetType::RadioButton) {
+                valor_encendido(w.annotation())
+            } else {
+                String::new()
+            };
             let r = w.annotation().rect().map_err(texto)?;
             campos.push(Campo {
                 pagina: n,
                 xref: w.xref().map_err(texto)?,
-                tipo: format!("{:?}", w.r#type().map_err(texto)?),
+                tipo: format!("{tipo:?}"),
                 nombre: w.name().map_err(texto)?.unwrap_or_default(),
                 valor: w.value().map_err(texto)?.unwrap_or_default(),
                 readonly: w.is_readonly().map_err(texto)?,
+                encendido,
                 x: ((r.x0 - caja.x0) / caja.width()).clamp(0.0, 1.0),
                 y: ((r.y0 - caja.y0) / caja.height()).clamp(0.0, 1.0),
                 w: ((r.x1 - r.x0) / caja.width()).clamp(0.0, 1.0),
@@ -1528,6 +1630,8 @@ fn fijar_campo(doc: &mut PdfDocument, n: i32, xref: i32, valor: &str) -> Result<
 fn guardar_doc(doc: &PdfDocument, destino: &str) -> Result<(), String> {
     let mut opciones = PdfWriteOptions::default();
     opciones.set_compress(true);
+    // Quita del archivo lo que ya no se usa (como una anotación borrada): no queda escondido en la copia.
+    opciones.set_garbage_level(1);
     let temporal = format!("{destino}.guardando");
     let r = doc
         .save_with_options(&temporal, opciones)
@@ -1665,6 +1769,121 @@ trailer<</Root 1 0 R>>
         assert_eq!(lista[0].pagina, 2);
         // Arriba de la hoja: y = (300 - 270) / 300.
         assert!((lista[0].y - 0.1).abs() < 0.01 && (lista[0].x - 0.1).abs() < 0.01);
+    }
+
+    fn anotacion(doc: &PdfDocument, n: i32, xref: i32) -> PdfAnnotation {
+        doc.load_pdf_page(n).unwrap().annotations().find(|a| a.xref().ok() == Some(xref)).unwrap()
+    }
+
+    #[test]
+    fn mover_un_sello_conserva_su_numero_y_el_centrado_y_se_puede_deshacer() {
+        let mut doc = doc_de(300.0, 400.0);
+        let xref = anotar_sello(&mut doc, 0, 0.5, 0.5, "PAGADO", (0.0, 0.5, 0.0), 18.0).unwrap();
+        let antes = datos_de(&doc, 0, xref).unwrap();
+        assert_eq!(mover_anotacion(&mut doc, 0, xref, 0.1, 0.0).unwrap(), xref);
+        let a = anotacion(&doc, 0, xref);
+        assert!(matches!(a.quadding().unwrap(), AnnotationTextAlign::Center));
+        assert!((a.rect().unwrap().x0 - antes.rect.x0 - 30.0).abs() < 0.5);
+        let mut hechas = vec![Hecho::Cambio { n: 0, xref, antes: antes.clone() }];
+        assert_eq!(deshacer(&mut doc, &mut hechas).unwrap(), Some(0));
+        assert!(hechas.is_empty());
+        assert!((datos_de(&doc, 0, xref).unwrap().rect.x0 - antes.rect.x0).abs() < 0.5);
+    }
+
+    #[test]
+    fn si_deshacer_falla_el_paso_no_se_pierde() {
+        let mut doc = doc_de(300.0, 400.0);
+        let antes = {
+            let x = anotar_sello(&mut doc, 0, 0.5, 0.5, "PAGADO", (0.0, 0.5, 0.0), 18.0).unwrap();
+            datos_de(&doc, 0, x).unwrap()
+        };
+        // Un número de anotación que no existe: deshacer falla.
+        let mut hechas = vec![Hecho::Cambio { n: 0, xref: 99_999, antes }];
+        assert!(deshacer(&mut doc, &mut hechas).is_err());
+        assert_eq!(hechas.len(), 1);
+    }
+
+    #[test]
+    fn lo_borrado_no_queda_escondido_en_la_copia_guardada() {
+        let carpeta = std::env::temp_dir().join(format!("dakarta-borrado-{}", std::process::id()));
+        std::fs::create_dir_all(&carpeta).unwrap();
+        let original = carpeta.join("original.pdf").to_string_lossy().into_owned();
+        let copia = carpeta.join("copia.pdf").to_string_lossy().into_owned();
+        let mut doc = doc_de(300.0, 400.0);
+        anotar_caja(&mut doc, 0, 0.1, 0.1, "SECRETO-123", (0.0, 0.0, 0.0), 12.0).unwrap();
+        guardar_doc(&doc, &original).unwrap();
+        let mut doc = PdfDocument::open(&original).unwrap();
+        let xref = doc.load_pdf_page(0).unwrap().annotations().next().unwrap().xref().unwrap();
+        borrar_anotacion(&mut doc, 0, xref).unwrap();
+        let mut opciones = PdfWriteOptions::default();
+        opciones.set_compress(false);
+        opciones.set_garbage_level(1);
+        doc.save_with_options(&copia, opciones).unwrap();
+        let bytes = std::fs::read(&copia).unwrap();
+        assert!(!bytes.windows(11).any(|w| w == b"SECRETO-123"));
+        std::fs::remove_dir_all(&carpeta).unwrap();
+    }
+
+    #[test]
+    fn la_busqueda_avanza_por_tandas_y_encuentra_en_todas_las_paginas() {
+        // 10 páginas con la palabra "hola": la búsqueda necesita varias tandas de 4.
+        let mut objs = vec![
+            "<</Type/Catalog/Pages 2 0 R>>".to_string(),
+            String::new(),
+            "<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>".to_string(),
+        ];
+        let mut kids = Vec::new();
+        for _ in 0..10 {
+            let contenido = "BT /F1 12 Tf 20 100 Td (hola mundo) Tj ET";
+            objs.push(format!("<</Length {}>>stream\n{}\nendstream", contenido.len(), contenido));
+            let c = objs.len();
+            objs.push(format!("<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Resources<</Font<</F1 3 0 R>>>>/Contents {c} 0 R>>"));
+            kids.push(format!("{} 0 R", objs.len()));
+        }
+        objs[1] = format!("<</Type/Pages/Kids[{}]/Count 10>>", kids.join(" "));
+        let mut pdf = String::from("%PDF-1.4\n");
+        for (i, o) in objs.iter().enumerate() {
+            pdf.push_str(&format!("{} 0 obj{}endobj\n", i + 1, o));
+        }
+        pdf.push_str("trailer<</Root 1 0 R>>\n%%EOF");
+        let ruta = std::env::temp_dir().join(format!("dakarta-busqueda-{}.pdf", std::process::id()));
+        std::fs::write(&ruta, pdf).unwrap();
+        let doc = PdfDocument::open(ruta.to_str().unwrap()).unwrap();
+        let (tx, rx) = mpsc::channel();
+        let mut b = BusquedaEnCurso::nueva("hola", tx).ok().unwrap();
+        let mut tandas = 1;
+        while !b.avanzar(&doc).unwrap() {
+            tandas += 1;
+        }
+        b.terminar();
+        let r = rx.recv().unwrap().unwrap();
+        std::fs::remove_file(&ruta).unwrap();
+        assert_eq!(tandas, 3);
+        assert_eq!(r.resultados.len(), 10);
+        assert!(!r.escaneado);
+    }
+
+    #[test]
+    fn las_casillas_usan_el_valor_de_su_pdf_y_los_botones_no_son_campos() {
+        // Formulario de prueba con datos inventados: casillas "acepto" y "noticias", opciones F/M.
+        let ruta = concat!(env!("CARGO_MANIFEST_DIR"), "/pruebas/formulario.pdf");
+        let mut doc = PdfDocument::open(ruta).unwrap();
+        let campos = campos_doc(&doc).unwrap();
+        assert!(campos.iter().all(|c| c.tipo != "Button"));
+        let acepto = campos.iter().find(|c| c.nombre == "acepto").unwrap();
+        assert_eq!(acepto.tipo, "Checkbox");
+        assert!(!acepto.encendido.is_empty() && acepto.encendido != "Off");
+        let (xref, encendido) = (acepto.xref, acepto.encendido.clone());
+        fijar_campo(&mut doc, 0, xref, &encendido).unwrap();
+        let ahora = campos_doc(&doc).unwrap();
+        assert_eq!(ahora.iter().find(|c| c.xref == xref).unwrap().valor, encendido);
+        // Opciones F y M: cada una con su propio valor, que no es "Yes".
+        let opciones: Vec<_> = ahora.iter().filter(|c| c.nombre == "sexo").collect();
+        assert_eq!(opciones.len(), 2);
+        let m = opciones.iter().find(|c| c.encendido == "M").expect("la opción M usa su propio valor");
+        fijar_campo(&mut doc, 0, m.xref, "M").unwrap();
+        let despues = campos_doc(&doc).unwrap();
+        assert!(despues.iter().filter(|c| c.nombre == "sexo").all(|c| c.valor == "M"), "{:?}", despues.iter().filter(|c| c.nombre == "sexo").map(|c| c.valor.clone()).collect::<Vec<_>>());
     }
 
     #[test]

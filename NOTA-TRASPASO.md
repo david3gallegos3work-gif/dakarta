@@ -16,7 +16,7 @@
 - David probó la 0.2.6: todo bien. Con el PDF de prueba vio el formulario doble (la casilla repetía el valor que ya dibuja la página). 0.2.7: la casilla queda solo como marco.
 - 0.2.8: recuadro "Dakarta · versión y descargas" (`src/AcercaDe.tsx`): en el inicio y al final del panel ☰. Versión instalada, si hay nueva, enlaces fijos del APK y .exe (copiar/descargar) y página de descargas. Sin versión web (Dakarta no tiene).
 - 0.2.9: los enlaces internos del PDF (el índice impreso de Word) se pueden tocar para saltar (`enlaces_de` en `motor.rs`). Las capas de la hoja ya no pasan por encima del panel ☰ (`isolation` en `.visor`). La manija izquierda de la selección: margen de recorte en `.texto-pdf` (por comprobar en el celular).
-- Idea pendiente (A): mensaje más claro cuando el PDF no trae marcadores.
+- 0.2.10: hallazgos 5 a 10 arreglados (ver lista) y mensaje más claro cuando el PDF no trae índice lateral. Pruebas del motor: 16.
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo
@@ -39,12 +39,12 @@ Revisé lo que hizo DeepSeek desde la marca `fin-fase-1-claude` (Fase 2 de edici
 4. ✅ (0.2.4) Con una hoja muy pequeña, poner un sello detiene el motor hasta reiniciar la app: `clamp` falla si el mínimo supera al máximo (`src-tauri/src/motor.rs:975-976`). El commit `23493c5` lo corrigió en otros lugares, no aquí. Arreglo de una línea: `.min().max()`.
 
 **Funcionan mal en algunos casos**
-5. Mover o editar una anotación la vuelve a crear con pocos datos. Un sello pierde el centrado al moverlo. Las anotaciones hechas en otros programas pierden su letra y autor (`src-tauri/src/motor.rs:1150-1207`).
-6. Formularios: las casillas usan siempre "Yes" y "Off", pero cada PDF puede usar otro valor; los botones del formulario también entran ahí (`src/App.tsx:862`). Por comprobar con formularios reales.
-7. Android: si falla la copia al destino, queda un archivo incompleto. Además `copia.pdf` se queda en la caché, y puede pesar tanto como el PDF (`scripts/parchar-android.py:169`, `src-tauri/src/lib.rs:187`).
-8. Lo borrado podría seguir escondido dentro de la copia guardada, porque no se activa la limpieza al guardar (`src-tauri/src/motor.rs:1439`). Por comprobar antes de confiar en ello con datos delicados.
-9. Buscar en un PDF enorme detiene el dibujo de páginas hasta terminar, y cerrar la búsqueda no la cancela (`src-tauri/src/motor.rs:726`).
-10. Si falla un deshacer, ese paso se pierde y el contador queda mal (`src-tauri/src/motor.rs:1346`). Cerrar el panel tras cambiar un texto puede crear dos pasos de deshacer (`src/App.tsx:2314`, `src/App.tsx:2337`).
+5. ✅ (0.2.10) Mover o editar una anotación la vuelve a crear con pocos datos. Un sello pierde el centrado al moverlo. Las anotaciones hechas en otros programas pierden su letra y autor (`src-tauri/src/motor.rs:1150-1207`).
+6. ✅ (0.2.10) Formularios: las casillas usan siempre "Yes" y "Off", pero cada PDF puede usar otro valor; los botones del formulario también entran ahí (`src/App.tsx:862`). Por comprobar con formularios reales.
+7. ✅ (0.2.10) Android: si falla la copia al destino, queda un archivo incompleto. Además `copia.pdf` se queda en la caché, y puede pesar tanto como el PDF (`scripts/parchar-android.py:169`, `src-tauri/src/lib.rs:187`).
+8. ✅ (0.2.10) Lo borrado podría seguir escondido dentro de la copia guardada, porque no se activa la limpieza al guardar (`src-tauri/src/motor.rs:1439`). Por comprobar antes de confiar en ello con datos delicados.
+9. ✅ (0.2.10) Buscar en un PDF enorme detiene el dibujo de páginas hasta terminar, y cerrar la búsqueda no la cancela (`src-tauri/src/motor.rs:726`).
+10. ✅ (0.2.10) Si falla un deshacer, ese paso se pierde y el contador queda mal (`src-tauri/src/motor.rs:1346`). Cerrar el panel tras cambiar un texto puede crear dos pasos de deshacer (`src/App.tsx:2314`, `src/App.tsx:2337`).
 
 **Orden y detalles**
 11. Código sin uso: `anotar_nota` (`src-tauri/src/lib.rs:70`, `src-tauri/src/motor.rs:887`). Los botones Nota y Texto hacen lo mismo (`src/App.tsx:794`).

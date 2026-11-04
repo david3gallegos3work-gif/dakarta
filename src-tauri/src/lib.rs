@@ -38,6 +38,11 @@ async fn buscar(motor: State<'_, Motor>, texto: String) -> Result<Busqueda, Stri
 }
 
 #[tauri::command]
+fn cancelar_busqueda(motor: State<'_, Motor>) {
+    motor.cancelar_busqueda();
+}
+
+#[tauri::command]
 async fn anotar_texto(
     motor: State<'_, Motor>,
     pagina: i32,
@@ -286,6 +291,7 @@ pub fn run() {
     abrir_ruta,
     descargar_version,
     buscar,
+    cancelar_busqueda,
     mostrar_archivo,
     anotar_texto,
     anotar_tinta,
