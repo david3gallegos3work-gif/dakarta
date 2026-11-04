@@ -936,7 +936,7 @@ fn anotar_caja(
     let tamano = tamano.clamp(6.0, 72.0);
     // El cuadro mide lo que el texto, no un ancho fijo de la página.
     let largo = contenido.lines().map(|l| l.chars().count()).max().unwrap_or(1) as f32;
-    let ancho = (largo * tamano * 0.55 + 14.0).clamp(60.0, caja.width() * 0.9);
+    let ancho = fijar(largo * tamano * 0.55 + 14.0, 60.0, caja.width() * 0.9);
     let ancho_chars = (ancho / (tamano * 0.5)).max(8.0) as usize;
     let lineas = envolver(contenido, ancho_chars);
     let envuelto = lineas.join("\n");
@@ -970,8 +970,8 @@ fn anotar_sello(
     }
     let tamano = tamano.clamp(8.0, 72.0);
     // El recuadro queda pegado a la etiqueta; se puede agrandar arrastrando su esquina.
-    let ancho = (etiqueta.chars().count() as f32 * tamano * 0.62 + 20.0).clamp(60.0, caja.width() * 0.9);
-    let alto = (tamano * 1.5 + 12.0).clamp(30.0, caja.height() * 0.2);
+    let ancho = fijar(etiqueta.chars().count() as f32 * tamano * 0.62 + 20.0, 60.0, caja.width() * 0.9);
+    let alto = fijar(tamano * 1.5 + 12.0, 30.0, caja.height() * 0.2);
     let x0 = (caja.x0 + x.clamp(0.0, 1.0) * caja.width() - ancho / 2.0).clamp(caja.x0, caja.x1 - ancho);
     let y0 = (caja.y0 + y.clamp(0.0, 1.0) * caja.height() - alto / 2.0).clamp(caja.y0, caja.y1 - alto);
     let rect = Rect::new(x0, y0, x0 + ancho, y0 + alto);
@@ -1307,8 +1307,8 @@ fn redimensionar_anotacion(doc: &mut PdfDocument, n: i32, xref: i32, x: f32, y: 
         return Err("Esta anotación no se puede agrandar.".into());
     }
     let viejo = d.rect;
-    let ancho = (w * caja.width()).clamp(4.0, caja.width());
-    let alto = (h * caja.height()).clamp(4.0, caja.height());
+    let ancho = fijar(w * caja.width(), 4.0, caja.width());
+    let alto = fijar(h * caja.height(), 4.0, caja.height());
     let x0 = (caja.x0 + x.clamp(0.0, 1.0) * caja.width()).min(caja.x1 - ancho).max(caja.x0);
     let y0 = (caja.y0 + y.clamp(0.0, 1.0) * caja.height()).min(caja.y1 - alto).max(caja.y0);
     let nuevo = Rect::new(x0, y0, x0 + ancho, y0 + alto);
