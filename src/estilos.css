@@ -30,6 +30,15 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .buscar-aviso { margin: 0; padding: 0 10px 8px; color: #b71c1c; font-size: 14px; }
 .buscar-nota { margin: 0; padding: 0 10px 8px; color: #455a64; font-size: 14px; }
 
+.seleccion-texto { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: #e8eef5; border-bottom: 1px solid #cfd8e3; color: #1a1a1a; font-size: 13px; }
+.seleccion-texto span { flex: 1; min-width: 0; }
+.seleccion-texto button { flex: none; min-height: 32px; padding: 0 10px; border: 0; border-radius: 6px; background: #1565c0; color: #fff; font: inherit; cursor: pointer; }
+.seleccion-texto button:last-child { background: transparent; color: #1565c0; }
+
+/* Texto invisible encima de la página: el sistema lo selecciona y lo copia. */
+.texto-pdf { position: absolute; z-index: 3; display: block; overflow: hidden; color: transparent; -webkit-text-fill-color: transparent; background: transparent; font-family: sans-serif; line-height: 1; white-space: pre; user-select: text; -webkit-user-select: text; cursor: text; }
+.texto-pdf::selection { background: rgba(21, 101, 192, 0.35); }
+
 .editar { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 6px; background: #e8eef5; border-bottom: 1px solid #cfd8e3; }
 .fila-herramientas, .fila-paleta, .fila-acciones, .fila-seleccion { display: flex; align-items: center; gap: 4px; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
 .fila-herramientas::-webkit-scrollbar, .fila-paleta::-webkit-scrollbar, .fila-acciones::-webkit-scrollbar, .fila-seleccion::-webkit-scrollbar { display: none; }
@@ -138,6 +147,10 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .noche .buscar .cuenta { color: #bbb; }
 .noche .buscar-aviso { color: #ff8a80; }
 .noche .buscar-nota { color: #bbb; }
+.noche .seleccion-texto { background: #222; border-color: #333; color: #eee; }
+.noche .seleccion-texto button { background: #1565c0; color: #fff; }
+.noche .seleccion-texto button:last-child { background: transparent; color: #90caf9; }
+.noche .texto-pdf::selection { background: rgba(144, 202, 249, 0.35); }
 .noche .recientes button { background: #242424; border-color: #3a3a3a; }
 .noche .recientes button:hover { background: #2f2f2f; }
 .noche .recientes-panel { background: #242424; }
