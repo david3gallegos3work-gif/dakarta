@@ -36,7 +36,7 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .seleccion-texto button:last-child { background: transparent; color: #1565c0; }
 
 /* Texto invisible encima de la página: el sistema lo selecciona y lo copia. */
-.texto-pdf { position: absolute; z-index: 3; display: block; overflow: hidden; color: transparent; -webkit-text-fill-color: transparent; background: transparent; font-family: sans-serif; line-height: 1; white-space: pre; user-select: text; -webkit-user-select: text; cursor: text; }
+.texto-pdf { position: absolute; z-index: 3; display: block; overflow: hidden; overflow: clip; overflow-clip-margin: 6px; color: transparent; -webkit-text-fill-color: transparent; background: transparent; font-family: sans-serif; line-height: 1; white-space: pre; user-select: text; -webkit-user-select: text; cursor: text; }
 .texto-pdf::selection { background: rgba(21, 101, 192, 0.35); }
 
 .editar { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 6px; background: #e8eef5; border-bottom: 1px solid #cfd8e3; }
@@ -76,7 +76,7 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .preview svg { display: block; width: 100%; height: 100%; }
 
 .cuerpo { position: relative; flex: 1; min-height: 0; display: flex; }
-.visor { flex: 1; overflow: auto; background: #525659; touch-action: pan-x pan-y; overscroll-behavior: contain; }
+.visor { flex: 1; overflow: auto; isolation: isolate; background: #525659; touch-action: pan-x pan-y; overscroll-behavior: contain; }
 .contenido { position: relative; transform-origin: 0 0; width: max-content; min-width: 100%; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); }
 .pagina { position: relative; display: flex; align-items: center; justify-content: center; margin: 0 auto 8px; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
 /* La imagen nítida se pinta encima de la miniatura. */
@@ -209,3 +209,6 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .noche .acerca-nueva { background: #0d47a1; color: #e3f2fd; }
 .noche .acerca-enlace { color: #90caf9; }
 .noche .indice .version-indice { border-color: #3a3a3a; color: #bbb; }
+/* Las capas de la hoja (texto, anotaciones, casillas, enlaces) quedan dentro del visor: nunca encima del panel ☰. */
+.enlace { position: absolute; z-index: 2; padding: 0; border: 0; border-radius: 3px; background: transparent; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.enlace:active { background: rgba(21, 101, 192, 0.18); }

@@ -69,6 +69,8 @@ type Campo = {
   h: number
 }
 /** Palabra del PDF para la capa de texto que permite seleccionar y copiar. */
+/** Enlace del PDF a otra de sus páginas (las líneas de un índice de Word): se puede tocar para saltar. */
+type Enlace = { pagina: number; x: number; y: number; w: number; h: number }
 type Palabra = {
   texto: string
   x: number
@@ -236,6 +238,7 @@ export default function App() {
   const [seleccion, setSeleccion] = useState<Anotacion | null>(null)
   const [seleccionTexto, setSeleccionTexto] = useState(false)
   const [palabras, setPalabras] = useState<Record<number, Palabra[]>>({})
+  const [enlaces, setEnlaces] = useState<Record<number, Enlace[]>>({})
   const [campoPedido, setCampoPedido] = useState<{ campo: Campo; valor: string } | null>(null)
   const [sucio, setSucio] = useState(false)
   const [hechas, setHechas] = useState(0)
@@ -314,6 +317,15 @@ export default function App() {
     try {
       const lista = await invoke<Palabra[]>('palabras', { pagina: n })
       setPalabras((m) => ({ ...m, [n]: lista }))
+    } catch (e) {
+      console.error(e)
+    }
+  }, [])
+
+  const cargarEnlaces = useCallback(async (n: number) => {
+    try {
+      const lista = await invoke<Enlace[]>('enlaces', { pagina: n })
+      setEnlaces((m) => ({ ...m, [n]: lista }))
     } catch (e) {
       console.error(e)
     }
@@ -661,6 +673,7 @@ export default function App() {
         setAnots({})
         setSeleccionTexto(false)
         setPalabras({})
+        setEnlaces({})
         textoSeleccionado.current = ''
         setRevisiones({})
         setRevisionTotal(0)
@@ -1098,6 +1111,15 @@ export default function App() {
       if (!(n in anots)) void cargarAnotaciones(n)
     }
   }, [editando, doc, visibles, anots, cargarAnotaciones])
+
+  // Leyendo (sin editar ni seleccionar texto), se piden los enlaces de las páginas que se ven.
+  useEffect(() => {
+    if (editando || seleccionTexto || !doc) return
+    const [a, b] = visibles
+    for (let n = Math.max(0, a - 1); n <= Math.min(doc.info.paginas - 1, b + 1); n++) {
+      if (!(n in enlaces)) void cargarEnlaces(n)
+    }
+  }, [editando, seleccionTexto, doc, visibles, enlaces, cargarEnlaces])
 
   // Al seleccionar texto, se piden las palabras de las páginas que se ven.
   useEffect(() => {
@@ -1695,6 +1717,8 @@ export default function App() {
                 onMover={moverAnotacion}
                 onRedimensionar={redimensionarAnotacion}
                 palabras={seleccionTexto ? palabras : undefined}
+                enlaces={!editando && !seleccionTexto ? enlaces : undefined}
+                onEnlace={ir}
               />
             )}
             {preview && (
@@ -2003,6 +2027,8 @@ const Paginas = memo(function Paginas({
   onMover,
   onRedimensionar,
   palabras,
+  enlaces,
+  onEnlace,
 }: {
   doc: Doc
   ancho: number
@@ -2023,6 +2049,8 @@ const Paginas = memo(function Paginas({
   onMover: (a: Anotacion, dx: number, dy: number) => void
   onRedimensionar: (a: Anotacion, w: number, h: number) => void
   palabras?: Record<number, Palabra[]>
+  enlaces?: Record<number, Enlace[]>
+  onEnlace: (n: number) => void
 }) {
   // Alto/ancho real de las páginas ya pintadas que no miden como la primera.
   const [prop, setProp] = useState<Record<number, number>>({})
@@ -2082,6 +2110,8 @@ const Paginas = memo(function Paginas({
         onMover={onMover}
         onRedimensionar={onRedimensionar}
         palabras={palabras?.[n]}
+        enlaces={enlaces?.[n]}
+        onEnlace={onEnlace}
       />
     )
   })
@@ -2108,6 +2138,8 @@ const Pagina = memo(function Pagina({
   onMover,
   onRedimensionar,
   palabras,
+  enlaces,
+  onEnlace,
 }: {
   n: number
   id: number
@@ -2129,6 +2161,8 @@ const Pagina = memo(function Pagina({
   onMover: (a: Anotacion, dx: number, dy: number) => void
   onRedimensionar: (a: Anotacion, w: number, h: number) => void
   palabras?: Palabra[]
+  enlaces?: Enlace[]
+  onEnlace: (n: number) => void
 }) {
   const url = (w: number) => `${convertFileSrc(String(n), 'pagina')}?w=${w}&d=${id}&v=${revisionTotal}-${revision}`
   return (
@@ -2159,6 +2193,21 @@ const Pagina = memo(function Pagina({
         >
           {p.texto}
         </span>
+      ))}
+      {enlaces?.map((e, i) => (
+        <button
+          key={i}
+          className="enlace"
+          style={{
+            left: `${e.x * 100}%`,
+            top: `${e.y * 100}%`,
+            width: `${e.w * 100}%`,
+            height: `${e.h * 100}%`,
+          }}
+          aria-label={`Ir a la página ${e.pagina + 1}`}
+          title={`Ir a la página ${e.pagina + 1}`}
+          onClick={() => onEnlace(e.pagina)}
+        />
       ))}
       {anots?.map((a) => (
         <CajaAnotacion

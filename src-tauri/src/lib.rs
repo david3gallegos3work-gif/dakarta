@@ -3,7 +3,7 @@ mod motor;
 
 use std::sync::Mutex;
 
-use motor::{Anotacion, Busqueda, Campo, Info, Motor, Palabra};
+use motor::{Anotacion, Busqueda, Campo, Enlace, Info, Motor, Palabra};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_opener::OpenerExt;
@@ -119,6 +119,11 @@ async fn anotaciones(motor: State<'_, Motor>, pagina: i32) -> Result<Vec<Anotaci
 #[tauri::command]
 async fn palabras(motor: State<'_, Motor>, pagina: i32) -> Result<Vec<Palabra>, String> {
     motor.palabras(pagina)
+}
+
+#[tauri::command]
+async fn enlaces(motor: State<'_, Motor>, pagina: i32) -> Result<Vec<Enlace>, String> {
+    motor.enlaces(pagina)
 }
 
 #[tauri::command]
@@ -289,6 +294,7 @@ pub fn run() {
     anotar_sello,
     anotaciones,
     palabras,
+    enlaces,
     mover_anotacion,
     editar_anotacion,
     redimensionar_anotacion,
