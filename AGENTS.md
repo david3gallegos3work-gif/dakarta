@@ -143,6 +143,8 @@ La idea es **limitar de verdad**, no solo avisar. El usuario no debe encontrar b
 
 **Organizar un solo PDF:** la misma pantalla para mover, eliminar, rotar, duplicar y extraer páginas a un PDF aparte, con **deshacer**.
 
+**Estado:** organizar un solo PDF hecho en la 0.3.0 (panel ☰ → «Organizar páginas»; `src/Organizar.tsx` y `src-tauri/src/motor/organizar.rs`). Se trabaja sobre una copia del PDF abierto que ya lleva las anotaciones sin guardar; las hojas repetidas llevan copia de sus anotaciones pero no de las casillas de formulario. Unir varios PDFs va en la 0.3.1.
+
 Las miniaturas de documentos grandes se generan poco a poco (no bloquear la pantalla).
 
 ## Gemini (Fase 5)

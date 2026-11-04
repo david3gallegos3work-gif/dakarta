@@ -3,7 +3,7 @@ mod motor;
 
 use std::sync::Mutex;
 
-use motor::{Anotacion, Busqueda, Campo, Enlace, Info, Motor, Palabra};
+use motor::{Anotacion, Busqueda, Campo, Enlace, Hoja, Info, Motor, Palabra};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_opener::OpenerExt;
@@ -181,22 +181,27 @@ async fn deshacer_todo(motor: State<'_, Motor>) -> Result<bool, String> {
 
 /// Android: deja la copia editada en la caché; la app la copia al destino elegido por el usuario.
 #[tauri::command]
-async fn guardar_en_cache(app: AppHandle, motor: State<'_, Motor>) -> Result<String, String> {
+async fn guardar_en_cache(app: AppHandle, motor: State<'_, Motor>, hojas: Option<Vec<Hoja>>) -> Result<String, String> {
     let copia = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("copia.pdf");
     let ruta = copia.to_string_lossy().into_owned();
-    motor.guardar(ruta.clone())?;
+    motor.guardar(ruta.clone(), hojas)?;
     Ok(ruta)
 }
 
 /// Windows: pregunta dónde guardar y escribe la copia ahí.
 #[tauri::command]
-async fn guardar_copia(app: AppHandle, motor: State<'_, Motor>, nombre: String) -> Result<Option<String>, String> {
+async fn guardar_copia(
+    app: AppHandle,
+    motor: State<'_, Motor>,
+    nombre: String,
+    hojas: Option<Vec<Hoja>>,
+) -> Result<Option<String>, String> {
     let Some(ruta) = app.dialog().file().set_file_name(nombre).add_filter("PDF", &["pdf"]).blocking_save_file() else {
         return Ok(None);
     };
     let ruta = ruta.into_path().map_err(|e| e.to_string())?;
     let destino = ruta.to_string_lossy().into_owned();
-    motor.guardar(destino.clone())?;
+    motor.guardar(destino.clone(), hojas)?;
     Ok(Some(destino))
 }
 

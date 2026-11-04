@@ -14,6 +14,7 @@ import {
   TAMANOS_SELLO,
   TAMANOS_TEXTO,
 } from './opciones.ts'
+import { Organizar } from './Organizar.tsx'
 import { Paginas } from './Paginas.tsx'
 import { Indice, Paleta, PanelAnotacion, Tamanos } from './Paneles.tsx'
 import { guardarReciente, leerRecientes, marcarAbriendo, olvidarReciente, seCerroAbriendo, type Reciente } from './recientes.ts'
@@ -26,6 +27,7 @@ import type {
   Doc,
   Enlace,
   Herramienta,
+  Hoja,
   Info,
   Palabra,
   Pregunta,
@@ -117,6 +119,7 @@ export default function App() {
   const [avisoEdicion, setAvisoEdicion] = useState(false)
   const [pregunta, setPregunta] = useState<Pregunta | null>(null)
   const [verAcerca, setVerAcerca] = useState(false)
+  const [verOrganizar, setVerOrganizar] = useState(false)
   /** Android: "Salir" del cuadro deja pasar el siguiente "atrás" sin volver a preguntar. */
   const saliendo = useRef(false)
   const [ayudaManual, setAyudaManual] = useState(false)
@@ -953,10 +956,16 @@ export default function App() {
     }
   }
 
-  const guardarCopia = async () => {
+  /**
+   * Guarda una copia. Con `organizar`, la copia lleva esas hojas en ese orden: al organizar se abre la
+   * copia nueva; al extraer se sigue en el PDF de siempre.
+   */
+  const guardarCopia = async (organizar?: { hojas: Hoja[]; extraer: boolean }) => {
     if (!doc || guardando) return
     const base = (nombreActual || doc.info.nombre).replace(/\.pdf$/i, '')
-    const nombre = `${base || 'Documento'} (anotado).pdf`
+    const sufijo = !organizar ? 'anotado' : organizar.extraer ? 'páginas' : 'organizado'
+    const nombre = `${base || 'Documento'} (${sufijo}).pdf`
+    const hojas = organizar?.hojas
     setGuardando(true)
     try {
       const puente = window.DakartaAndroid
@@ -966,19 +975,30 @@ export default function App() {
         if (!destino) return
         const elegido = destino
         // Si el motor no logra escribir la copia, el archivo vacío que se creó en el destino no se queda.
-        const cache = await invoke<string>('guardar_en_cache').catch((e) => {
+        const cache = await invoke<string>('guardar_en_cache', { hojas }).catch((e) => {
           puente.borrar?.(elegido)
           throw e
         })
         if (!puente.copiar(destino, cache)) throw new Error('No se pudo guardar la copia.')
         puente.persistir(destino)
       } else {
-        destino = await invoke<string | null>('guardar_copia', { nombre })
+        destino = await invoke<string | null>('guardar_copia', { nombre, hojas })
         if (!destino) return
       }
       const guardada = destino
       // Windows: el nombre que eligió en la ventana de guardar, no el que se le sugirió.
       const nombreDestino = puente?.nombre(guardada) || guardada.split(/[\\/]/).pop() || nombre
+      if (organizar) {
+        if (organizar.extraer) {
+          setRecientes((lista) => guardarReciente(lista, { ruta: guardada, nombre: nombreDestino }))
+          setExito('Páginas extraídas en una copia aparte')
+        } else {
+          // El PDF abierto no cambió: se abre la copia organizada para seguir en ella.
+          setVerOrganizar(false)
+          cargar(invoke<Info>('abrir_ruta', { ruta: guardada }), { ruta: guardada, nombre: nombreDestino })
+        }
+        return
+      }
       setRutaActual(guardada)
       setNombreActual(nombreDestino)
       setRecientes((lista) => guardarReciente(lista, { ruta: guardada, nombre: nombreDestino }))
@@ -1041,6 +1061,10 @@ export default function App() {
         setVerAcerca(false)
         return true
       }
+      if (verOrganizar) {
+        setVerOrganizar(false)
+        return true
+      }
       if (verIndice) {
         setVerIndice(false)
         return true
@@ -1066,7 +1090,7 @@ export default function App() {
     return () => {
       delete window.DakartaAtras
     }
-  }, [verIndice, verBuscar, cerrarBuscar, sucio, pregunta, verAcerca])
+  }, [verIndice, verBuscar, cerrarBuscar, sucio, pregunta, verAcerca, verOrganizar])
 
   // Windows: avisar antes de cerrar la ventana si hay cambios sin guardar.
   useEffect(() => {
@@ -1415,7 +1439,7 @@ export default function App() {
             />
           )}
           <div className="fila-acciones">
-            <button onClick={guardarCopia} disabled={guardando}>
+            <button onClick={() => guardarCopia()} disabled={guardando}>
               {guardando ? 'Guardando…' : 'Guardar copia'}
             </button>
             <button onClick={salirEditar}>Listo</button>
@@ -1472,6 +1496,15 @@ export default function App() {
             ) : (
               <p>Este PDF no trae índice lateral. Si tiene una página de índice al inicio, toca sus líneas: si traen enlace, te llevan a esa página.</p>
             )}
+            <button
+              className="version-indice"
+              onClick={() => {
+                setVerIndice(false)
+                setVerOrganizar(true)
+              }}
+            >
+              Organizar páginas
+            </button>
             <button className="version-indice" onClick={() => setVerAcerca(true)}>
               Dakarta · versión y descargas
             </button>
@@ -1703,6 +1736,18 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {verOrganizar && doc && (
+        <Organizar
+          doc={doc}
+          guardando={guardando}
+          onGuardar={(hojas, extraer) => void guardarCopia({ hojas, extraer })}
+          onCerrar={() => setVerOrganizar(false)}
+          aviso={exito}
+          error={error}
+          onAviso={setError}
+        />
+      )}
 
       {verAcerca && (
         <div className="fondo-aviso" role="dialog" aria-modal="true" aria-labelledby="titulo-acerca" onClick={() => setVerAcerca(false)}>
