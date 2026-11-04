@@ -1407,6 +1407,15 @@ export default function App() {
                 <path d="M16.5 4.8v3.6h-3.6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
+            <button
+              aria-pressed={herramienta === 'mover'}
+              onClick={() => {
+                setSeleccion(null)
+                setHerramienta('mover')
+              }}
+            >
+              Mover
+            </button>
             <button aria-pressed={herramienta === 'nota'} onClick={() => elegir('nota')}>
               Nota
             </button>
@@ -1463,6 +1472,11 @@ export default function App() {
               {(herramienta === 'nota' || herramienta === 'texto' || herramienta === 'firma' || herramienta === 'sello') && (
                 <span className="pista">Toca la página donde lo quieres</span>
               )}
+            </div>
+          )}
+          {!seleccion && herramienta === 'mover' && (
+            <div className="fila-paleta">
+              <span className="pista">Toca un dibujo, texto o sello para cambiarlo; arrástralo para moverlo</span>
             </div>
           )}
           {seleccion && herramienta === 'mover' && (
