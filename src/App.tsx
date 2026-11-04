@@ -1,7 +1,7 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import logo from '../assets/logo.jpg'
-import { guardarReciente, leerRecientes, olvidarReciente, type Reciente } from './recientes.ts'
+import { guardarReciente, leerRecientes, marcarAbriendo, olvidarReciente, seCerroAbriendo, type Reciente } from './recientes.ts'
 import { buscarActualizacion, type Actualizacion } from './version.ts'
 import { ANCHO_ENTERA_MAX, anchoEntera, imanZoom, limitarZoom, MINIATURA, recorte, type Recorte } from './zoom.ts'
 
@@ -635,9 +635,12 @@ export default function App() {
   async function cargar(pedido: Promise<Info | null>, reciente?: Reciente) {
     setAbriendo(true)
     setError('')
+    marcarAbriendo(true)
+    let abierto = false
     try {
       const info = await pedido
       if (info) {
+        abierto = true
         setDoc((d) => ({ info, id: (d?.id ?? 0) + 1 }))
         setRutaActual(info.ruta)
         setNombreActual(info.nombre)
@@ -684,19 +687,23 @@ export default function App() {
       if (reciente) setRecientes((lista) => olvidarReciente(lista, reciente.ruta))
     } finally {
       setAbriendo(false)
+      // Si la app se cierra mientras se pintan las primeras hojas, la marca queda puesta.
+      if (abierto) setTimeout(() => marcarAbriendo(false), 5000)
+      else marcarAbriendo(false)
     }
   }
 
   const puedeCambiar = () => !sucio || confirm('Hay cambios sin guardar. ¿Abrir otro PDF y perderlos?')
 
   // En Android el selector lo abre la propia app: así el permiso queda guardado y el archivo se puede reabrir otro día.
+  // En Android el aviso de cambios sin guardar sale cuando llega el archivo (igual que con "Abrir con").
   const abrir = () => {
-    if (!puedeCambiar()) return
     const puente = window.DakartaAndroid
     if (puente?.elegir) {
       puente.elegir()
       return
     }
+    if (!puedeCambiar()) return
     cargar(invoke<Info | null>('elegir_pdf'))
   }
 
@@ -1121,14 +1128,21 @@ export default function App() {
     }
     const pendiente = () => {
       const ruta = window.DakartaAndroid?.pendiente()
-      if (ruta) abrirRuta(ruta)
+      if (!ruta) return
+      if (sucioRef.current && !confirm('Hay cambios sin guardar. ¿Abrir otro PDF y perderlos?')) return
+      abrirRuta(ruta)
     }
     pendiente()
     invoke<string | null>('archivo_inicial').then((ruta) => {
       if (ruta) abrirRuta(ruta)
       else if (!llegoArchivo) {
         const [ultimo] = leerRecientes()
-        if (ultimo) abrirRuta(ultimo.ruta, ultimo)
+        if (!ultimo) return
+        // Si la vez anterior la app se cerró abriendo un PDF, no se reabre solo: se cerraría otra vez.
+        if (seCerroAbriendo()) {
+          marcarAbriendo(false)
+          setError(`La última vez Dakarta se cerró al abrir un PDF. Si quieres, abre «${ultimo.nombre}» con «Abrir».`)
+        } else abrirRuta(ultimo.ruta, ultimo)
       }
     })
     document.addEventListener('visibilitychange', pendiente)
