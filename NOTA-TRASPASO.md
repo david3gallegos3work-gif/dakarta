@@ -2,7 +2,7 @@
 
 **Fecha y lugar:** 2026-11-03 22:20, en la PC. Actualizada el 2026-11-04 (Ecuador) desde la nube.
 **IA y aparato:** Claude Code. Revisión en la PC; arreglos en la nube.
-**Rama:** `main` (versión 0.2.13).
+**Rama:** `main` (versión 0.2.14).
 
 ## Hecho en la nube (2026-11-03 y 2026-11-04)
 
@@ -20,6 +20,7 @@
 - 0.2.11: en un grupo de opciones (F/M), al elegir una las demás seguían viéndose marcadas (MuPDF solo cambia la que se toca). `apagar_las_demas` en `motor.rs`.
 - 0.2.12: hallazgos 11 y 14 cerrados. La Nota es un texto con fondo amarillo tipo post-it (`postit` en `anotar_caja`); Texto va sin fondo. Se quitó `anotar_nota` (sin uso). En Windows se muestra el nombre elegido al guardar. David confirmó las tres decisiones de `AGENTS.md` y se quitó de `CLAUDE.md` la sección "Revisar lo que hizo otra IA" (revisión terminada). Pruebas del motor: 17.
 - 0.2.13: al editar el texto de una nota, texto o sello, la hoja se actualiza mientras se escribe (en cada pausa de 350 ms), no solo al tocar fuera. Lo escrito de un tirón es un solo paso de deshacer (`junto` en `editar_anotacion`). Pruebas del motor: 18.
+- 0.2.14: con la escritura en vivo, una N sola se volvía Ñ (el teclado cerraba la palabra a medias y la corregía). El panel espera a que el teclado termine la palabra (`compositionend`) y el cuadro va con `autoCorrect="off"`. Por comprobar en el celular.
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo
@@ -52,7 +53,7 @@ Revisé lo que hizo DeepSeek desde la marca `fin-fase-1-claude` (Fase 2) y, con 
 **Orden y detalles**
 11. ✅ (0.2.12) Código sin uso: `anotar_nota` (`src-tauri/src/lib.rs:70`, `src-tauri/src/motor.rs:887`). Los botones Nota y Texto hacen lo mismo (`src/App.tsx:794`).
 12. El motor tiene 17 pruebas (0.2.12); seguir agregando en lo que se toque, aunque maneja lo que se guarda. David pide pruebas en todo lo que transforma datos.
-13. ⏳ Decidido con David: antes de la Fase 3, en una subida aparte. `src/App.tsx` (2.360 líneas) y `src-tauri/src/motor.rs` (1.500) quedaron muy grandes y con bloques repetidos. Conviene separarlos antes de la Fase 3.
+13. ✅ (junto con la 0.2.14, por pedido de David) Separados sin cambiar lo que hace: el motor en `motor/` y la pantalla en `Paginas.tsx`, `Paneles.tsx`, `tipos.ts` y `opciones.ts`. Antes: `src/App.tsx` (2.360 líneas) y `src-tauri/src/motor.rs` (1.500) quedaron muy grandes y con bloques repetidos. Conviene separarlos antes de la Fase 3.
 14. ✅ (0.2.6 y 0.2.12) El cuadro de texto ignora los Enter y cuenta mal las tildes al cortar líneas (`src-tauri/src/motor.rs:988-1005`). En Windows, tras guardar se muestra el nombre sugerido, no el elegido (`src/App.tsx:1038`).
 15. El motor ahora solo abre PDF (`PdfDocument`): la Fase 4 (otros formatos) tendrá que ajustarlo.
 
@@ -63,7 +64,7 @@ Búsqueda, últimos archivos, compartir, selector de Android con permiso guardab
 ## Qué falta, en orden
 
 1. David prueba la 0.2.12 en el celular: Nota amarilla, formulario (F/M y casillas), mover un sello, buscar en un PDF grande, guardar copia, tocar el índice impreso y las dos manijas de selección.
-2. Antes de la Fase 3: separar `src/App.tsx` y `src-tauri/src/motor.rs` en archivos más pequeños (hallazgo 13), en una subida aparte, sin cambiar lo que se ve.
+2. ✅ Separados `App.tsx` y `motor.rs` (hallazgo 13), junto con la 0.2.14.
 3. Fase 3 — Unir y organizar páginas (ver `AGENTS.md`).
 
 ## Pendiente para el celular
