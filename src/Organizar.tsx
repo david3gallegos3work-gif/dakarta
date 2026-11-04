@@ -1,0 +1,265 @@
+import { convertFileSrc } from '@tauri-apps/api/core'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { moverMarcadas, type Ficha } from './organizar.ts'
+import type { Doc, Hoja } from './tipos.ts'
+import { MINIATURA } from './zoom.ts'
+
+/** Mantener presionada una ficha este tiempo la levanta para arrastrarla. */
+const ESPERA_ARRASTRE = 350
+
+/** La ficha mide 3 de ancho por 4 de alto. Una hoja girada de lado se achica para entrar completa. */
+function giroQueEntra(giro: number, proporcion = 4 / 3) {
+  if (giro % 180 === 0) return `rotate(${giro}deg)`
+  const ancho = 1
+  const alto = proporcion
+  const normal = Math.min(3 / ancho, 4 / alto)
+  const girada = Math.min(3 / alto, 4 / ancho)
+  return `rotate(${giro}deg) scale(${girada / normal})`
+}
+
+type Arrastre = { id: number; x: number; y: number; destino: number | null }
+
+/**
+ * Pantalla con todas las hojas en miniatura: mover, girar, quitar, duplicar o extraer, con deshacer.
+ * Nada se cambia en el PDF hasta guardar; ahí el motor arma un PDF nuevo con este orden.
+ */
+export function Organizar({
+  doc,
+  guardando,
+  onGuardar,
+  onCerrar,
+  aviso,
+  error,
+  onAviso,
+}: {
+  doc: Doc
+  guardando: boolean
+  onGuardar: (hojas: Hoja[], extraer: boolean) => void
+  onCerrar: () => void
+  /** Avisos de la app (copia guardada, errores): esta pantalla tapa los de siempre, así que los muestra ella. */
+  aviso: string
+  error: string
+  onAviso: (texto: string) => void
+}) {
+  const inicial = useMemo(
+    () => Array.from({ length: doc.info.paginas }, (_, i): Ficha => ({ id: i, pagina: i, giro: 0 })),
+    [doc],
+  )
+  const [lista, setLista] = useState(inicial)
+  const [historial, setHistorial] = useState<Ficha[][]>([])
+  const [marcadas, setMarcadas] = useState<Set<number>>(new Set())
+  const [arrastre, setArrastre] = useState<Arrastre | null>(null)
+  // Alto entre ancho de cada página, para achicar bien las giradas.
+  const [proporciones, setProporciones] = useState<Record<number, number>>({})
+  const siguienteId = useRef(doc.info.paginas)
+  const reloj = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const inicio = useRef<{ id: number; x: number; y: number } | null>(null)
+  const arrastrando = useRef(false)
+  const rejilla = useRef<HTMLDivElement>(null)
+  // Las miniaturas se piden de nuevo cada vez que se abre: así muestran las anotaciones recién hechas.
+  const apertura = useMemo(() => Date.now(), [])
+
+  const cambiar = (nueva: Ficha[]) => {
+    setHistorial((h) => [...h, lista])
+    setLista(nueva)
+  }
+  const deshacer = () => {
+    const anterior = historial.at(-1)
+    if (!anterior) return
+    setHistorial((h) => h.slice(0, -1))
+    setLista(anterior)
+    setMarcadas((m) => new Set([...m].filter((id) => anterior.some((f) => f.id === id))))
+  }
+
+  const marcadasEnOrden = lista.filter((f) => marcadas.has(f.id))
+  const alternar = (id: number) =>
+    setMarcadas((m) => {
+      const n = new Set(m)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
+
+  const mover = (paso: -1 | 1) => cambiar(moverMarcadas(lista, marcadas, paso))
+  const girar = () => cambiar(lista.map((f) => (marcadas.has(f.id) ? { ...f, giro: (f.giro + 90) % 360 } : f)))
+  const duplicar = () => {
+    const nueva: Ficha[] = []
+    const copias = new Set<number>()
+    for (const f of lista) {
+      nueva.push(f)
+      if (marcadas.has(f.id)) {
+        const id = siguienteId.current++
+        nueva.push({ ...f, id })
+        copias.add(id)
+      }
+    }
+    cambiar(nueva)
+    setMarcadas(copias)
+  }
+  const quitar = () => {
+    if (marcadasEnOrden.length === lista.length) {
+      onAviso('Debe quedar al menos una página.')
+      return
+    }
+    cambiar(lista.filter((f) => !marcadas.has(f.id)))
+    setMarcadas(new Set())
+  }
+  const hojas = (fichas: Ficha[]): Hoja[] => fichas.map((f) => ({ pagina: f.pagina, giro: f.giro }))
+
+  // Mientras se arrastra una ficha, el dedo no debe desplazar la lista.
+  useEffect(() => {
+    const el = rejilla.current
+    if (!el) return
+    const frenar = (e: TouchEvent) => {
+      if (arrastrando.current) e.preventDefault()
+    }
+    el.addEventListener('touchmove', frenar, { passive: false })
+    return () => el.removeEventListener('touchmove', frenar)
+  }, [])
+  useEffect(() => () => clearTimeout(reloj.current), [])
+
+  const fichaBajo = (x: number, y: number) => {
+    const el = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-i]')
+    return el ? Number(el.dataset.i) : null
+  }
+  const soltar = () => {
+    clearTimeout(reloj.current)
+    inicio.current = null
+    const a = arrastre
+    arrastrando.current = false
+    setArrastre(null)
+    if (!a || a.destino === null) return
+    const desde = lista.findIndex((f) => f.id === a.id)
+    if (desde < 0 || desde === a.destino) return
+    const nueva = lista.slice()
+    const [f] = nueva.splice(desde, 1)
+    nueva.splice(a.destino, 0, f)
+    cambiar(nueva)
+  }
+
+  const fichaArrastrada = arrastre && lista.find((f) => f.id === arrastre.id)
+  const url = (f: Ficha) => `${convertFileSrc(String(f.pagina), 'pagina')}?w=${MINIATURA}&d=${doc.id}&o=${apertura}`
+
+  return (
+    <div className="organizar" role="dialog" aria-modal="true" aria-label="Organizar páginas">
+      <header className="barra organizar-barra">
+        <button onClick={onCerrar} aria-label="Volver al PDF" title="Volver al PDF">
+          ←
+        </button>
+        <strong>Organizar páginas</strong>
+        <span className="organizar-cuenta">{lista.length} hojas</span>
+        <button className="derecha" onClick={deshacer} disabled={!historial.length} aria-label="Deshacer" title="Deshacer">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9 14 4 9l5-5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M4 9h9.5a5.5 5.5 0 0 1 0 11H11" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+          </svg>
+        </button>
+      </header>
+      {error ? (
+        <button className="organizar-ayuda organizar-error" onClick={() => onAviso('')}>
+          {error} (tocar para cerrar)
+        </button>
+      ) : (
+        <p className={aviso ? 'organizar-ayuda organizar-ok' : 'organizar-ayuda'} role="status">
+          {aviso || 'Toca las hojas para marcarlas. Mantén presionada una y arrástrala para moverla.'}
+        </p>
+      )}
+      <div className="organizar-rejilla" ref={rejilla}>
+        {lista.map((f, i) => (
+          <button
+            key={f.id}
+            data-i={i}
+            className={[
+              'ficha',
+              marcadas.has(f.id) ? 'marcada' : '',
+              arrastre?.id === f.id ? 'levantada' : '',
+              arrastre?.destino === i && arrastre.id !== f.id ? 'destino' : '',
+            ].join(' ')}
+            aria-pressed={marcadas.has(f.id)}
+            aria-label={`Hoja ${i + 1}, página ${f.pagina + 1} del original${f.giro ? `, girada ${f.giro}°` : ''}`}
+            onClick={() => {
+              if (!arrastrando.current) alternar(f.id)
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            onPointerDown={(e) => {
+              inicio.current = { id: f.id, x: e.clientX, y: e.clientY }
+              clearTimeout(reloj.current)
+              reloj.current = setTimeout(() => {
+                const p = inicio.current
+                if (!p) return
+                arrastrando.current = true
+                setArrastre({ id: p.id, x: p.x, y: p.y, destino: null })
+              }, ESPERA_ARRASTRE)
+            }}
+            onPointerMove={(e) => {
+              const p = inicio.current
+              if (!p) return
+              if (!arrastrando.current) {
+                // Se movió antes de levantarla: es desplazar la lista, no arrastrar.
+                if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) {
+                  clearTimeout(reloj.current)
+                  inicio.current = null
+                }
+                return
+              }
+              setArrastre((a) => a && { ...a, x: e.clientX, y: e.clientY, destino: fichaBajo(e.clientX, e.clientY) })
+            }}
+            onPointerUp={soltar}
+            onPointerCancel={soltar}
+          >
+            <span className="ficha-hoja">
+              <img
+                src={url(f)}
+                alt=""
+                loading="lazy"
+                draggable={false}
+                style={{ transform: giroQueEntra(f.giro, proporciones[f.pagina]) }}
+                onLoad={(e) => {
+                  const { naturalWidth: w, naturalHeight: h } = e.currentTarget
+                  if (w && h && !(f.pagina in proporciones)) setProporciones((p) => ({ ...p, [f.pagina]: h / w }))
+                }}
+              />
+            </span>
+            <span className="ficha-numero">
+              {i + 1}
+              {f.pagina !== i && <small> (pág. {f.pagina + 1})</small>}
+            </span>
+          </button>
+        ))}
+      </div>
+      {fichaArrastrada && arrastre && (
+        <img
+          className="ficha-fantasma"
+          src={url(fichaArrastrada)}
+          alt=""
+          style={{ left: arrastre.x, top: arrastre.y, transform: `translate(-50%, -50%) rotate(${fichaArrastrada.giro}deg)` }}
+        />
+      )}
+      <div className="organizar-acciones">
+        {marcadasEnOrden.length > 0 ? (
+          <>
+            <span className="organizar-cuenta">{marcadasEnOrden.length} marcadas</span>
+            <button onClick={() => mover(-1)} aria-label="Mover antes" title="Mover antes">
+              ◀
+            </button>
+            <button onClick={() => mover(1)} aria-label="Mover después" title="Mover después">
+              ▶
+            </button>
+            <button onClick={girar}>Girar</button>
+            <button onClick={duplicar}>Duplicar</button>
+            <button onClick={quitar}>Quitar</button>
+            <button onClick={() => onGuardar(hojas(marcadasEnOrden), true)} disabled={guardando}>
+              Extraer
+            </button>
+            <button onClick={() => setMarcadas(new Set())}>Desmarcar</button>
+          </>
+        ) : (
+          <span className="organizar-cuenta">Marca hojas para moverlas, girarlas, quitarlas o extraerlas.</span>
+        )}
+        <button className="grande" onClick={() => onGuardar(hojas(lista), false)} disabled={guardando}>
+          {guardando ? 'Guardando…' : 'Guardar copia'}
+        </button>
+      </div>
+    </div>
+  )
+}
