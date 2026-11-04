@@ -117,6 +117,14 @@ class PuenteDakarta(private val actividad: android.app.Activity) {
     } catch (_: Exception) { }
   }
 
+  /** "Salir" del cuadro de cambios sin guardar: repite el "atrás"; la pantalla ya no lo detiene. */
+  @android.webkit.JavascriptInterface
+  fun salir() {
+    actividad.runOnUiThread {
+      (actividad as androidx.activity.ComponentActivity).onBackPressedDispatcher.onBackPressed()
+    }
+  }
+
   /** Menú de compartir de Android con el PDF que está abierto. */
   @android.webkit.JavascriptInterface
   fun compartir(uri: String, nombre: String) {

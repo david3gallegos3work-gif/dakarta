@@ -17,11 +17,15 @@ declare global {
       guardar?(nombre: string): void
       destino?(): string | null
       copiar?(destino: string, origen: string): boolean
+      salir?(): void
     }
     /** Android: el botón o gesto "atrás" pregunta si la pantalla lo usó o si toca salir. */
     DakartaAtras?: () => boolean
   }
 }
+
+/** Pregunta con el cuadro de la app y no con confirm(): el aviso de Android congela la pantalla. */
+type Pregunta = { titulo: string; texto: string; si: string; no: string; alSi: () => void }
 
 type Entrada = { titulo: string; pagina: number | null; hijos: Entrada[] }
 type Info = {
@@ -235,8 +239,9 @@ export default function App() {
   const [sucio, setSucio] = useState(false)
   const [hechas, setHechas] = useState(0)
   const [avisoEdicion, setAvisoEdicion] = useState(false)
-  /** Android: PDF que llegó por "Abrir con" mientras había cambios sin guardar; espera la respuesta de David. */
-  const [porAbrir, setPorAbrir] = useState<string | null>(null)
+  const [pregunta, setPregunta] = useState<Pregunta | null>(null)
+  /** Android: "Salir" del cuadro deja pasar el siguiente "atrás" sin volver a preguntar. */
+  const saliendo = useRef(false)
   const [ayudaManual, setAyudaManual] = useState(false)
   const [recordarAviso, setRecordarAviso] = useState(false)
   const [preview, setPreview] = useState<Preview | null>(null)
@@ -695,7 +700,17 @@ export default function App() {
     }
   }
 
-  const puedeCambiar = () => !sucio || confirm('Hay cambios sin guardar. ¿Abrir otro PDF y perderlos?')
+  /** Con cambios sin guardar, pregunta antes de abrir otro PDF; si no hay, lo abre directo. */
+  const siPuedeCambiar = (abrirOtro: () => void) => {
+    if (!sucioRef.current) return abrirOtro()
+    setPregunta({
+      titulo: 'Hay cambios sin guardar',
+      texto: 'Si abres otro PDF, se pierden los cambios de este.',
+      si: 'Abrir el otro',
+      no: 'Seguir aquí',
+      alSi: abrirOtro,
+    })
+  }
 
   // En Android el selector lo abre la propia app: así el permiso queda guardado y el archivo se puede reabrir otro día.
   // En Android el aviso de cambios sin guardar sale cuando llega el archivo (igual que con "Abrir con").
@@ -705,13 +720,11 @@ export default function App() {
       puente.elegir()
       return
     }
-    if (!puedeCambiar()) return
-    cargar(invoke<Info | null>('elegir_pdf'))
+    siPuedeCambiar(() => cargar(invoke<Info | null>('elegir_pdf')))
   }
 
   const abrirReciente = (r: Reciente) => {
-    if (!puedeCambiar()) return
-    cargar(invoke<Info>('abrir_ruta', { ruta: r.ruta }), r)
+    siPuedeCambiar(() => cargar(invoke<Info>('abrir_ruta', { ruta: r.ruta }), r))
   }
 
   const entrarEditar = () => {
@@ -778,8 +791,16 @@ export default function App() {
     }
   }
 
-  const deshacerTodo = async () => {
-    if (!confirm('¿Quitar todos los cambios de esta sesión? Lo que ya guardaste no se toca.')) return
+  const deshacerTodo = () =>
+    setPregunta({
+      titulo: 'Quitar todos los cambios',
+      texto: 'Se quitan todos los cambios de esta sesión. Lo que ya guardaste no se toca.',
+      si: 'Quitar todo',
+      no: 'Cancelar',
+      alSi: () => void quitarTodo(),
+    })
+
+  const quitarTodo = async () => {
     try {
       const hecho = await invoke<boolean>('deshacer_todo')
       if (!hecho) return
@@ -1086,6 +1107,14 @@ export default function App() {
   // El botón o gesto "atrás" de Android cierra primero el panel o la búsqueda; si no hay nada abierto, sale.
   useEffect(() => {
     window.DakartaAtras = () => {
+      if (saliendo.current) {
+        saliendo.current = false
+        return false
+      }
+      if (pregunta) {
+        setPregunta(null)
+        return true
+      }
       if (verIndice) {
         setVerIndice(false)
         return true
@@ -1094,13 +1123,24 @@ export default function App() {
         cerrarBuscar()
         return true
       }
-      if (sucio) return !confirm('Hay cambios sin guardar. ¿Salir de Dakarta y perderlos?')
-      return false
+      const puente = window.DakartaAndroid
+      if (!sucio || !puente?.salir) return false
+      setPregunta({
+        titulo: 'Hay cambios sin guardar',
+        texto: 'Si sales de Dakarta, se pierden los cambios.',
+        si: 'Salir',
+        no: 'Seguir aquí',
+        alSi: () => {
+          saliendo.current = true
+          puente.salir?.()
+        },
+      })
+      return true
     }
     return () => {
       delete window.DakartaAtras
     }
-  }, [verIndice, verBuscar, cerrarBuscar, sucio])
+  }, [verIndice, verBuscar, cerrarBuscar, sucio, pregunta])
 
   // Windows: avisar antes de cerrar la ventana si hay cambios sin guardar.
   useEffect(() => {
@@ -1110,7 +1150,15 @@ export default function App() {
       .then(({ getCurrentWindow }) =>
         getCurrentWindow()
           .onCloseRequested((e) => {
-            if (sucio && !confirm('Hay cambios sin guardar. ¿Cerrar Dakarta y perderlos?')) e.preventDefault()
+            if (!sucio) return
+            e.preventDefault()
+            setPregunta({
+              titulo: 'Hay cambios sin guardar',
+              texto: 'Si cierras Dakarta, se pierden los cambios.',
+              si: 'Cerrar',
+              no: 'Seguir aquí',
+              alSi: () => void getCurrentWindow().destroy(),
+            })
           })
           .then((u) => {
             des = u
@@ -1131,9 +1179,7 @@ export default function App() {
     const pendiente = () => {
       const ruta = window.DakartaAndroid?.pendiente()
       if (!ruta) return
-      // Cuadro propio y no confirm(): el aviso de Android congela la pantalla y al cancelar tarda en volver.
-      if (sucioRef.current) setPorAbrir(ruta)
-      else abrirRuta(ruta)
+      siPuedeCambiar(() => abrirRuta(ruta))
     }
     pendiente()
     invoke<string | null>('archivo_inicial').then((ruta) => {
@@ -1175,17 +1221,26 @@ export default function App() {
             </button>
             <button
               onClick={() => {
-                if (sucio && !confirm('Hay cambios sin guardar. Se compartirá el archivo original, sin los cambios. ¿Continuar?')) return
-                setVerIndice(false)
-                // Android: menú de compartir del sistema. Windows: la carpeta con el PDF seleccionado.
-                if (window.DakartaAndroid?.compartir) {
-                  window.DakartaAndroid.compartir(rutaActual, nombreActual)
-                } else {
-                  invoke('mostrar_archivo', { ruta: rutaActual }).catch((e) => {
-                    console.error(e)
-                    setError('No se pudo abrir la carpeta del archivo.')
-                  })
+                const compartir = () => {
+                  setVerIndice(false)
+                  // Android: menú de compartir del sistema. Windows: la carpeta con el PDF seleccionado.
+                  if (window.DakartaAndroid?.compartir) {
+                    window.DakartaAndroid.compartir(rutaActual, nombreActual)
+                  } else {
+                    invoke('mostrar_archivo', { ruta: rutaActual }).catch((e) => {
+                      console.error(e)
+                      setError('No se pudo abrir la carpeta del archivo.')
+                    })
+                  }
                 }
+                if (!sucio) return compartir()
+                setPregunta({
+                  titulo: 'Hay cambios sin guardar',
+                  texto: 'Se compartirá el archivo original, sin los cambios.',
+                  si: 'Compartir',
+                  no: 'Cancelar',
+                  alSi: compartir,
+                })
               }}
               aria-label="Compartir"
               title="Compartir"
@@ -1700,21 +1755,21 @@ export default function App() {
         )}
       </div>
 
-      {porAbrir && (
-        <div className="fondo-aviso" role="dialog" aria-modal="true" aria-labelledby="titulo-por-abrir">
+      {pregunta && (
+        <div className="fondo-aviso" role="dialog" aria-modal="true" aria-labelledby="titulo-pregunta">
           <div className="tarjeta-aviso">
-            <h2 id="titulo-por-abrir">Hay cambios sin guardar</h2>
-            <p>Llegó otro PDF. Si lo abres, se pierden los cambios de este.</p>
+            <h2 id="titulo-pregunta">{pregunta.titulo}</h2>
+            <p>{pregunta.texto}</p>
             <div className="fila-botones">
-              <button onClick={() => setPorAbrir(null)}>Seguir aquí</button>
+              <button onClick={() => setPregunta(null)}>{pregunta.no}</button>
               <button
                 className="grande"
                 onClick={() => {
-                  setPorAbrir(null)
-                  cargar(invoke<Info>('abrir_ruta', { ruta: porAbrir }))
+                  setPregunta(null)
+                  pregunta.alSi()
                 }}
               >
-                Abrir el otro
+                {pregunta.si}
               </button>
             </div>
           </div>
