@@ -17,6 +17,7 @@
 - 0.2.8: recuadro "Dakarta · versión y descargas" (`src/AcercaDe.tsx`): en el inicio y al final del panel ☰. Versión instalada, si hay nueva, enlaces fijos del APK y .exe (copiar/descargar) y página de descargas. Sin versión web (Dakarta no tiene).
 - 0.2.9: los enlaces internos del PDF (el índice impreso de Word) se pueden tocar para saltar (`enlaces_de` en `motor.rs`). Las capas de la hoja ya no pasan por encima del panel ☰ (`isolation` en `.visor`). La manija izquierda de la selección: margen de recorte en `.texto-pdf` (por comprobar en el celular).
 - 0.2.10: hallazgos 5 a 10 arreglados (ver lista) y mensaje más claro cuando el PDF no trae índice lateral. Pruebas del motor: 16.
+- 0.2.11: en un grupo de opciones (F/M), al elegir una las demás seguían viéndose marcadas (MuPDF solo cambia la que se toca). `apagar_las_demas` en `motor.rs`.
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo
