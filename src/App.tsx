@@ -235,6 +235,8 @@ export default function App() {
   const [sucio, setSucio] = useState(false)
   const [hechas, setHechas] = useState(0)
   const [avisoEdicion, setAvisoEdicion] = useState(false)
+  /** Android: PDF que llegó por "Abrir con" mientras había cambios sin guardar; espera la respuesta de David. */
+  const [porAbrir, setPorAbrir] = useState<string | null>(null)
   const [ayudaManual, setAyudaManual] = useState(false)
   const [recordarAviso, setRecordarAviso] = useState(false)
   const [preview, setPreview] = useState<Preview | null>(null)
@@ -1129,8 +1131,9 @@ export default function App() {
     const pendiente = () => {
       const ruta = window.DakartaAndroid?.pendiente()
       if (!ruta) return
-      if (sucioRef.current && !confirm('Hay cambios sin guardar. ¿Abrir otro PDF y perderlos?')) return
-      abrirRuta(ruta)
+      // Cuadro propio y no confirm(): el aviso de Android congela la pantalla y al cancelar tarda en volver.
+      if (sucioRef.current) setPorAbrir(ruta)
+      else abrirRuta(ruta)
     }
     pendiente()
     invoke<string | null>('archivo_inicial').then((ruta) => {
@@ -1696,6 +1699,27 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {porAbrir && (
+        <div className="fondo-aviso" role="dialog" aria-modal="true" aria-labelledby="titulo-por-abrir">
+          <div className="tarjeta-aviso">
+            <h2 id="titulo-por-abrir">Hay cambios sin guardar</h2>
+            <p>Llegó otro PDF. Si lo abres, se pierden los cambios de este.</p>
+            <div className="fila-botones">
+              <button onClick={() => setPorAbrir(null)}>Seguir aquí</button>
+              <button
+                className="grande"
+                onClick={() => {
+                  setPorAbrir(null)
+                  cargar(invoke<Info>('abrir_ruta', { ruta: porAbrir }))
+                }}
+              >
+                Abrir el otro
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {avisoEdicion && (
         <div className="fondo-aviso" role="dialog" aria-modal="true" aria-labelledby="titulo-edicion">
