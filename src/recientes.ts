@@ -37,3 +37,23 @@ export function guardarReciente(lista: Reciente[], nuevo: Reciente): Reciente[] 
 export function olvidarReciente(lista: Reciente[], ruta: string): Reciente[] {
   return guardar(lista.filter((r) => r.ruta !== ruta))
 }
+
+const ABRIENDO = 'abriendo'
+
+/** Se pone antes de abrir un PDF y se quita cuando ya se ve. Si sigue puesta al arrancar, ese PDF cerró la app. */
+export function marcarAbriendo(si: boolean) {
+  try {
+    if (si) localStorage.setItem(ABRIENDO, '1')
+    else localStorage.removeItem(ABRIENDO)
+  } catch {
+    // sin almacenamiento: se reabre el último como siempre
+  }
+}
+
+export function seCerroAbriendo(): boolean {
+  try {
+    return localStorage.getItem(ABRIENDO) === '1'
+  } catch {
+    return false
+  }
+}
