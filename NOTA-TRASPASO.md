@@ -53,7 +53,7 @@ Revisé lo que hizo DeepSeek desde la marca `fin-fase-1-claude` (Fase 2) y, con 
 **Orden y detalles**
 11. ✅ (0.2.12) Código sin uso: `anotar_nota` (`src-tauri/src/lib.rs:70`, `src-tauri/src/motor.rs:887`). Los botones Nota y Texto hacen lo mismo (`src/App.tsx:794`).
 12. El motor tiene 17 pruebas (0.2.12); seguir agregando en lo que se toque, aunque maneja lo que se guarda. David pide pruebas en todo lo que transforma datos.
-13. ⏳ Decidido con David: antes de la Fase 3, en una subida aparte. `src/App.tsx` (2.360 líneas) y `src-tauri/src/motor.rs` (1.500) quedaron muy grandes y con bloques repetidos. Conviene separarlos antes de la Fase 3.
+13. ✅ (junto con la 0.2.14, por pedido de David) Separados sin cambiar lo que hace: el motor en `motor/` y la pantalla en `Paginas.tsx`, `Paneles.tsx`, `tipos.ts` y `opciones.ts`. Antes: `src/App.tsx` (2.360 líneas) y `src-tauri/src/motor.rs` (1.500) quedaron muy grandes y con bloques repetidos. Conviene separarlos antes de la Fase 3.
 14. ✅ (0.2.6 y 0.2.12) El cuadro de texto ignora los Enter y cuenta mal las tildes al cortar líneas (`src-tauri/src/motor.rs:988-1005`). En Windows, tras guardar se muestra el nombre sugerido, no el elegido (`src/App.tsx:1038`).
 15. El motor ahora solo abre PDF (`PdfDocument`): la Fase 4 (otros formatos) tendrá que ajustarlo.
 
@@ -64,7 +64,7 @@ Búsqueda, últimos archivos, compartir, selector de Android con permiso guardab
 ## Qué falta, en orden
 
 1. David prueba la 0.2.12 en el celular: Nota amarilla, formulario (F/M y casillas), mover un sello, buscar en un PDF grande, guardar copia, tocar el índice impreso y las dos manijas de selección.
-2. Antes de la Fase 3: separar `src/App.tsx` y `src-tauri/src/motor.rs` en archivos más pequeños (hallazgo 13), en una subida aparte, sin cambiar lo que se ve.
+2. ✅ Separados `App.tsx` y `motor.rs` (hallazgo 13), junto con la 0.2.14.
 3. Fase 3 — Unir y organizar páginas (ver `AGENTS.md`).
 
 ## Pendiente para el celular
