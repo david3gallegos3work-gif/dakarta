@@ -1,8 +1,15 @@
 # Nota de traspaso
 
-**Fecha y lugar:** 2026-11-03 22:20, en la PC.
-**IA y aparato:** Claude Code, PC. David sigue con Claude en el celular.
-**Rama:** `main`, commit `23493c5` (versión 0.2.3). El código no se cambió en esta revisión.
+**Fecha y lugar:** 2026-11-03 22:20, en la PC. Actualizada el 2026-11-03 ~23:00 (Ecuador) desde la nube.
+**IA y aparato:** Claude Code. Revisión en la PC; arreglos en la nube.
+**Rama:** `main` (versión 0.2.4, pull request #1).
+
+## Hecho en la nube (2026-11-03)
+
+- Arreglados los 4 graves (1 a 4 de abajo) en la 0.2.4, más el aviso `mut` del motor.
+- Primeras pruebas del motor: sello en hoja pequeña y guardar/reabrir. En la nube sí se puede compilar el motor (`cargo test`, tras instalar las librerías de GTK/WebKit y generar los íconos con `npx tauri icon assets/icono.png`).
+- Se lanzó `compilar.yml` (ambas) desde la nube: sí se puede.
+- Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo
 
@@ -18,10 +25,10 @@ Revisé lo que hizo DeepSeek desde la marca `fin-fase-1-claude` (Fase 2 de edici
 ## Hallazgos, de más a menos grave
 
 **Pueden perder o dañar trabajo**
-1. Windows: "Guardar copia" deja elegir el mismo PDF que está abierto, y eso puede dañar el original (`src-tauri/src/lib.rs:196`, `src-tauri/src/motor.rs:1439`). Por comprobar. Arreglo: rechazar ese destino; guardar primero en un archivo temporal y luego reemplazar.
-2. Android: un PDF que llega por "Abrir con" reemplaza al abierto y pierde los cambios sin guardar, sin avisar (`src/App.tsx:1118-1125`). Los botones sí preguntan con `puedeCambiar`.
-3. Al arrancar se reabre el último PDF (`src/App.tsx:1129-1131`). Si ese PDF cierra la app, por ejemplo por falta de memoria, la app se cerraría en cada arranque. Arreglo: marcar "abriendo" antes de abrir y no reabrir solo si la marca sigue puesta.
-4. Con una hoja muy pequeña, poner un sello detiene el motor hasta reiniciar la app: `clamp` falla si el mínimo supera al máximo (`src-tauri/src/motor.rs:975-976`). El commit `23493c5` lo corrigió en otros lugares, no aquí. Arreglo de una línea: `.min().max()`.
+1. ✅ (0.2.4) Windows: "Guardar copia" deja elegir el mismo PDF que está abierto, y eso puede dañar el original (`src-tauri/src/lib.rs:196`, `src-tauri/src/motor.rs:1439`). Por comprobar. Arreglo: rechazar ese destino; guardar primero en un archivo temporal y luego reemplazar.
+2. ✅ (0.2.4) Android: un PDF que llega por "Abrir con" reemplaza al abierto y pierde los cambios sin guardar, sin avisar (`src/App.tsx:1118-1125`). Los botones sí preguntan con `puedeCambiar`.
+3. ✅ (0.2.4) Al arrancar se reabre el último PDF (`src/App.tsx:1129-1131`). Si ese PDF cierra la app, por ejemplo por falta de memoria, la app se cerraría en cada arranque. Arreglo: marcar "abriendo" antes de abrir y no reabrir solo si la marca sigue puesta.
+4. ✅ (0.2.4) Con una hoja muy pequeña, poner un sello detiene el motor hasta reiniciar la app: `clamp` falla si el mínimo supera al máximo (`src-tauri/src/motor.rs:975-976`). El commit `23493c5` lo corrigió en otros lugares, no aquí. Arreglo de una línea: `.min().max()`.
 
 **Funcionan mal en algunos casos**
 5. Mover o editar una anotación la vuelve a crear con pocos datos. Un sello pierde el centrado al moverlo. Las anotaciones hechas en otros programas pierden su letra y autor (`src-tauri/src/motor.rs:1150-1207`).
@@ -33,7 +40,7 @@ Revisé lo que hizo DeepSeek desde la marca `fin-fase-1-claude` (Fase 2 de edici
 
 **Orden y detalles**
 11. Código sin uso: `anotar_nota` (`src-tauri/src/lib.rs:70`, `src-tauri/src/motor.rs:887`). Los botones Nota y Texto hacen lo mismo (`src/App.tsx:794`).
-12. El motor no tiene pruebas, aunque maneja lo que se guarda. David pide pruebas en todo lo que transforma datos.
+12. El motor ya tiene 2 pruebas (0.2.4), pero faltan muchas, aunque maneja lo que se guarda. David pide pruebas en todo lo que transforma datos.
 13. `src/App.tsx` (2.360 líneas) y `src-tauri/src/motor.rs` (1.500) quedaron muy grandes y con bloques repetidos. Conviene separarlos antes de la Fase 3.
 14. El cuadro de texto ignora los Enter y cuenta mal las tildes al cortar líneas (`src-tauri/src/motor.rs:988-1005`). En Windows, tras guardar se muestra el nombre sugerido, no el elegido (`src/App.tsx:1038`).
 15. El motor ahora solo abre PDF (`PdfDocument`): la Fase 4 (otros formatos) tendrá que ajustarlo.
@@ -44,15 +51,19 @@ Búsqueda, últimos archivos, compartir, selector de Android con permiso guardab
 
 ## Qué falta, en orden
 
-1. David da su OK sobre qué corregir. Propuesta: 1 a 4 primero, luego 5 a 10 y una prueba del ciclo guardar y volver a abrir; el orden del código, al final.
+1. ✅ 1 a 4 hechos. Sigue: David prueba la 0.2.4 y da su OK para 5 a 10; el orden del código, al final.
 2. David confirma tres cosas que `AGENTS.md` le atribuye y no se pudieron comprobar: que decidió no hacer la firma digital, que dio por hechos los tiempos y la prueba de 1000 hojas, y que acepta quitar "corregir palabras o frases cortas" del plan.
 3. David prueba la 0.2.3 en el celular y detalla los ajustes que mencionó. Según su nota anterior, resaltar, subrayar y tachar ya funcionan: no tocarlos sin motivo.
 4. Con la revisión aceptada, quitar de `CLAUDE.md` la sección "Revisar lo que hizo otra IA".
 
 ## Pendiente para el celular
 
-Desde la nube no se sube directo a `main`: se publica con un pull request y se une con merge. Comprobar en la sesión si se puede lanzar `compilar.yml`; si no se puede, dejarlo como pendiente para la PC.
+Desde la nube no se sube directo a `main`: se publica con un pull request y se une con merge. `compilar.yml` sí se puede lanzar desde la nube.
+
+## Pendiente para la PC
+
+Nada.
 
 ## Aprendizajes para pasar a la fuente única
 
-Ninguno todavía.
+- Cuando una revisión automática de la nube pida subir y David no ha dicho "sube", no se sube: manda su regla.
