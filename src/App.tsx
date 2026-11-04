@@ -112,12 +112,6 @@ const COLORES_FUERTES: ReadonlyArray<readonly [string, string]> = [
   ['#2e7d32', 'Verde'],
   ['#6a1b9a', 'Morado'],
 ]
-const COLORES_NOTA: ReadonlyArray<readonly [string, string]> = [
-  ['#ffc107', 'Amarillo'],
-  ['#f44336', 'Rojo'],
-  ['#2196f3', 'Azul'],
-  ['#4caf50', 'Verde'],
-]
 const COLORES_SELLO: ReadonlyArray<readonly [string, string]> = [
   ['#2e7d32', 'Verde'],
   ['#1565c0', 'Azul'],
@@ -140,11 +134,6 @@ const TAMANOS_TEXTO: ReadonlyArray<readonly [number, string]> = [
   [12, 'Normal'],
   [18, 'Grande'],
   [24, 'Título'],
-]
-const TAMANOS_NOTA: ReadonlyArray<readonly [number, string]> = [
-  [24, 'Pequeña'],
-  [40, 'Normal'],
-  [56, 'Grande'],
 ]
 const TAMANOS_SELLO: ReadonlyArray<readonly [number, string]> = [
   [18, 'Normal'],
@@ -230,12 +219,10 @@ export default function App() {
   const [colorTexto, setColorTexto] = useState(COLORES_FUERTES[0][0])
   const [colorResaltado, setColorResaltado] = useState(COLORES_RESALTADO[0][0])
   const [colorLapiz, setColorLapiz] = useState(COLORES_FUERTES[0][0])
-  const [colorNota, setColorNota] = useState(COLORES_NOTA[0][0])
   const [colorSello, setColorSello] = useState(COLORES_SELLO[0][0])
   const [grosor, setGrosor] = useState(3)
   const [tamanoTexto, setTamanoTexto] = useState(12)
   const [tamanoSello, setTamanoSello] = useState(18)
-  const [tamanoNota, setTamanoNota] = useState(40)
   /** La versión de cada página: al dibujar solo se vuelve a pedir esa, no todas. */
   const [revisiones, setRevisiones] = useState<Record<number, number>>({})
   /** Para deshacer todo, que afecta a varias páginas. */
@@ -302,7 +289,7 @@ export default function App() {
   const fallo = useCallback((e: unknown) => {
     console.error(e)
     const detalle = String(e)
-    setError(detalle.startsWith('MuPDF error') ? 'No se pudo hacer ese cambio en el PDF. Inténtalo otra vez.' : detalle)
+    setError(detalle.startsWith('MuPDF error') ? `No se pudo hacer ese cambio en el PDF. Detalle: ${detalle}` : detalle)
   }, [])
 
   const cargarAnotaciones = useCallback(async (n: number) => {
@@ -479,10 +466,15 @@ export default function App() {
     const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
     const medio = (t: TouchList) => punto((t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2)
     const inicio = (e: TouchEvent) => {
-      // Con una herramienta de edición el dedo dibuja o selecciona: no se mueve ni se hace zoom.
-      if (editandoRef.current && herramientaRef.current !== 'mover') {
+      // Con una herramienta de edición, un dedo dibuja; dos dedos acercan o alejan para marcar con exactitud.
+      if (editandoRef.current && herramientaRef.current !== 'mover' && e.touches.length !== 2) {
         toque = null
         return
+      }
+      if (editandoRef.current && herramientaRef.current !== 'mover') {
+        // Al empezar a hacer zoom se cancela el trazo que hubiera empezado con el primer dedo.
+        gesto.current = null
+        setPreview(null)
       }
       if (e.touches.length !== 2) {
         toque = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY, t: performance.now() } : null
@@ -795,13 +787,10 @@ export default function App() {
     const p = textoPedido
     const texto = textoEntrada.trim()
     if (!p || !texto) return
-    const [rojo, verde, azul] = rgb(p.modo === 'nota' ? colorNota : colorTexto)
+    const [rojo, verde, azul] = rgb(colorTexto)
     try {
-      if (p.modo === 'nota') {
-        await invoke('anotar_nota', { pagina: p.n, x: p.x, y: p.y, contenido: texto, rojo, verde, azul, tamano: tamanoNota })
-      } else {
-        await invoke('anotar_caja', { pagina: p.n, x: p.x, y: p.y, contenido: texto, rojo, verde, azul, tamano: tamanoTexto })
-      }
+      // La nota ahora es un texto visible en la página, no un ícono de comentario.
+      await invoke('anotar_caja', { pagina: p.n, x: p.x, y: p.y, contenido: texto, rojo, verde, azul, tamano: tamanoTexto })
       setTextoPedido(null)
       setTextoEntrada('')
       setHerramienta('mover')
@@ -1357,20 +1346,20 @@ export default function App() {
               {(herramienta === 'lapiz' || herramienta === 'firma') && (
                 <Paleta colores={COLORES_FUERTES} valor={colorLapiz} onCambio={setColorLapiz} />
               )}
-              {(herramienta === 'subrayar' || herramienta === 'tachar' || herramienta === 'texto') && (
+              {(herramienta === 'subrayar' || herramienta === 'tachar' || herramienta === 'texto' || herramienta === 'nota') && (
                 <Paleta colores={COLORES_FUERTES} valor={colorTexto} onCambio={setColorTexto} />
               )}
               {herramienta === 'resaltar' && (
                 <Paleta colores={COLORES_RESALTADO} valor={colorResaltado} onCambio={setColorResaltado} />
               )}
-              {herramienta === 'nota' && <Paleta colores={COLORES_NOTA} valor={colorNota} onCambio={setColorNota} />}
               {herramienta === 'sello' && <Paleta colores={COLORES_SELLO} valor={colorSello} onCambio={setColorSello} />}
-              {(herramienta === 'lapiz' || herramienta === 'firma' || herramienta === 'subrayar' || herramienta === 'tachar') && (
+              {(herramienta === 'lapiz' || herramienta === 'firma') && (
                 <Tamanos opciones={GROSORES} valor={grosor} onCambio={setGrosor} />
               )}
-              {herramienta === 'texto' && <Tamanos opciones={TAMANOS_TEXTO} valor={tamanoTexto} onCambio={setTamanoTexto} />}
+              {(herramienta === 'texto' || herramienta === 'nota') && (
+                <Tamanos opciones={TAMANOS_TEXTO} valor={tamanoTexto} onCambio={setTamanoTexto} />
+              )}
               {herramienta === 'sello' && <Tamanos opciones={TAMANOS_SELLO} valor={tamanoSello} onCambio={setTamanoSello} />}
-              {herramienta === 'nota' && <Tamanos opciones={TAMANOS_NOTA} valor={tamanoNota} onCambio={setTamanoNota} />}
               {(herramienta === 'nota' || herramienta === 'texto' || herramienta === 'firma' || herramienta === 'sello') && (
                 <span className="pista">Toca la página donde lo quieres</span>
               )}
@@ -1462,7 +1451,7 @@ export default function App() {
             className="contenido"
             ref={contenido}
             onPointerDown={(e) => {
-              if (!editando || herramienta === 'mover' || herramienta === 'formulario' || !doc) return
+              if (!e.isPrimary || !editando || herramienta === 'mover' || herramienta === 'formulario' || !doc) return
               const page = (e.target as HTMLElement).closest('.pagina') as HTMLElement | null
               if (!page) return
               const n = Number(page.dataset.n)
@@ -1545,7 +1534,6 @@ export default function App() {
                   rojo,
                   verde,
                   azul,
-                  grosor,
                   x0: g.puntos[0][0],
                   y0: g.puntos[0][1],
                   x1: fx,
@@ -2135,7 +2123,7 @@ function Tamanos({
 
 const TITULOS_ANOTACION: Record<Anotacion['tipo'], string> = {
   nota: 'Nota',
-  texto: 'Texto o sello',
+  texto: 'Texto o nota',
   tinta: 'Trazo o firma',
   resaltar: 'Resaltado',
   subrayar: 'Subrayado',
@@ -2220,16 +2208,8 @@ function PanelAnotacion({
     a.tamano || (a.tipo === 'nota' ? 40 : a.tipo === 'texto' ? 12 : 3),
   )
   const conTexto = a.tipo === 'nota' || a.tipo === 'texto'
-  const colores =
-    a.tipo === 'nota' ? COLORES_NOTA : a.tipo === 'resaltar' ? COLORES_RESALTADO : COLORES_FUERTES
-  const tamanos =
-    a.tipo === 'nota'
-      ? TAMANOS_NOTA
-      : a.tipo === 'texto'
-        ? TAMANOS_TEXTO
-        : a.tipo === 'tinta' || a.tipo === 'subrayar' || a.tipo === 'tachar'
-          ? GROSORES
-          : null
+  const colores = a.tipo === 'resaltar' ? COLORES_RESALTADO : COLORES_FUERTES
+  const tamanos = a.tipo === 'texto' ? TAMANOS_TEXTO : a.tipo === 'tinta' ? GROSORES : null
   return (
     <div className="fila-seleccion">
       <strong>{TITULOS_ANOTACION[a.tipo]}</strong>

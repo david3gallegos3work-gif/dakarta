@@ -59,7 +59,8 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .editar .color.otro input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 
 /* Cajas invisibles sobre las anotaciones: se tocan para elegir y arrastrar para mover. */
-.anot { position: absolute; z-index: 2; min-width: 28px; min-height: 28px; border: 1.5px dashed rgba(21, 101, 192, 0.55); border-radius: 3px; background: rgba(21, 101, 192, 0.06); touch-action: none; cursor: grab; }
+/* La caja de toque es invisible: solo se marca la anotación elegida. */
+.anot { position: absolute; z-index: 2; min-width: 28px; min-height: 28px; border: 0; border-radius: 3px; background: transparent; touch-action: none; cursor: grab; }
 .anot.seleccionada { border: 2px solid #f57c00; background: rgba(245, 124, 0, 0.12); cursor: grabbing; }
 
 /* Panel de la anotación elegida. */
@@ -163,7 +164,7 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .noche .fila-seleccion { background: #242424; border-color: #3a3a3a; }
 .noche .fila-seleccion strong { color: #bbb; }
 .noche .fila-seleccion textarea { background: #2f2f2f; border-color: #555; color: #eee; }
-.noche .anot { border-color: rgba(144, 202, 249, 0.55); background: rgba(144, 202, 249, 0.08); }
+.noche .anot { border-color: transparent; background: transparent; }
 .noche .anot.seleccionada { border-color: #ffb74d; background: rgba(255, 183, 77, 0.15); }
 .noche .editar button[aria-pressed='true'] { background: #1565c0; border-color: #1565c0; color: #fff; }
 .noche .editar .color { border-color: #1a1a1a; box-shadow: 0 0 0 1px #777; }
