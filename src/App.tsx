@@ -2152,6 +2152,7 @@ const Pagina = memo(function Pagina({
           }}
         />
       ))}
+      {/* Solo el marco para tocar: el valor ya lo dibuja la página; repetirlo aquí se veía doble. */}
       {campos?.map((c) => (
         <button
           key={c.xref}
@@ -2163,10 +2164,9 @@ const Pagina = memo(function Pagina({
             height: `${c.h * 100}%`,
           }}
           title={c.nombre || 'Campo del formulario'}
+          aria-label={`${c.nombre || 'Campo del formulario'}: ${c.valor || 'vacío'}`}
           onClick={() => onCampo(c)}
-        >
-          {c.valor}
-        </button>
+        />
       ))}
     </div>
   )
