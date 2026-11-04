@@ -6,7 +6,7 @@ use std::time::Instant;
 use mupdf::color::AnnotationColor;
 use mupdf::pdf::annotation::{AnnotationTextAlign, PdfAnnotation, PdfAnnotationType};
 use mupdf::pdf::document::{PdfDocument, PdfWriteOptions};
-use mupdf::pdf::WidgetType;
+use mupdf::pdf::{PdfObject, PdfPage, WidgetType};
 use mupdf::point::Point;
 use mupdf::quad::Quad;
 use mupdf::rect::Rect;
@@ -1622,7 +1622,31 @@ fn fijar_campo(doc: &mut PdfDocument, n: i32, xref: i32, valor: &str) -> Result<
     let anterior = widget.value().map_err(texto)?.unwrap_or_default();
     widget.set_value(doc, valor, true).map_err(texto)?;
     widget.update().map_err(texto)?;
+    if widget.r#type().map_err(texto)? == WidgetType::RadioButton {
+        let grupo = widget.name().map_err(texto)?;
+        let elegido = widget.value().map_err(texto)?.unwrap_or_default();
+        apagar_las_demas(&pagina, grupo.as_deref(), &elegido).map_err(texto)?;
+    }
     Ok(anterior)
+}
+
+/// MuPDF solo cambia la opción que se toca: las demás del grupo seguían viéndose marcadas.
+/// Cada una queda marcada solo si su valor es el elegido.
+fn apagar_las_demas(pagina: &PdfPage, grupo: Option<&str>, elegido: &str) -> Result<(), mupdf::Error> {
+    for w in pagina.widgets() {
+        if w.r#type()? != WidgetType::RadioButton || w.name()?.as_deref() != grupo {
+            continue;
+        }
+        let propio = valor_encendido(w.annotation());
+        let estado = if propio == elegido { propio.as_str() } else { "Off" };
+        let mut a = w.into_annotation();
+        a.object().dict_put("AS", PdfObject::new_name(estado)?)?;
+        // Volver a poner la misma caja avisa a MuPDF que cambió y debe redibujarla.
+        let caja = a.rect()?;
+        a.set_rect(caja)?;
+        a.update()?;
+    }
+    Ok(())
 }
 
 /// Se escribe primero a un archivo aparte y solo al terminar reemplaza al destino:
@@ -1883,7 +1907,19 @@ trailer<</Root 1 0 R>>
         let m = opciones.iter().find(|c| c.encendido == "M").expect("la opción M usa su propio valor");
         fijar_campo(&mut doc, 0, m.xref, "M").unwrap();
         let despues = campos_doc(&doc).unwrap();
-        assert!(despues.iter().filter(|c| c.nombre == "sexo").all(|c| c.valor == "M"), "{:?}", despues.iter().filter(|c| c.nombre == "sexo").map(|c| c.valor.clone()).collect::<Vec<_>>());
+        assert!(despues.iter().filter(|c| c.nombre == "sexo").all(|c| c.valor == "M"));
+        // Lo que se ve: solo la M queda marcada; la otra opción del grupo se apaga.
+        let estados: Vec<String> = doc
+            .load_pdf_page(0)
+            .unwrap()
+            .widgets()
+            .filter(|w| w.name().unwrap().as_deref() == Some("sexo"))
+            .map(|w| String::from_utf8_lossy(&w.annotation().object().get_dict("AS").unwrap().unwrap().as_name().unwrap()).into_owned())
+            .collect();
+        assert_eq!(estados.iter().filter(|e| *e != "Off").collect::<Vec<_>>(), vec!["M"]);
+        // Y una casilla se desmarca al tocarla otra vez.
+        fijar_campo(&mut doc, 0, xref, "Off").unwrap();
+        assert_eq!(campos_doc(&doc).unwrap().iter().find(|c| c.xref == xref).unwrap().valor, "Off");
     }
 
     #[test]
