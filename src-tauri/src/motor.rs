@@ -234,15 +234,6 @@ enum Pedido {
         trazos: Vec<Vec<(f32, f32)>>,
         resp: Sender<Result<(), String>>,
     },
-    Nota {
-        n: i32,
-        x: f32,
-        y: f32,
-        contenido: String,
-        color: (f32, f32, f32),
-        tamano: f32,
-        resp: Sender<Result<(), String>>,
-    },
     Redimensionar {
         n: i32,
         xref: i32,
@@ -259,6 +250,7 @@ enum Pedido {
         contenido: String,
         color: (f32, f32, f32),
         tamano: f32,
+        postit: bool,
         resp: Sender<Result<(), String>>,
     },
     Sello {
@@ -370,20 +362,10 @@ impl Motor {
                             };
                             let _ = resp.send(r);
                         }
-                        Pedido::Nota { n, x, y, contenido, color, tamano, resp } => {
+                        Pedido::Caja { n, x, y, contenido, color, tamano, postit, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => anotar_nota(doc, n, x, y, &contenido, color, tamano).map(|xref| {
-                                    hechas.push(Hecho::Anotacion { n, xref });
-                                    cache.olvidar_pagina(n);
-                                }),
-                            };
-                            let _ = resp.send(r);
-                        }
-                        Pedido::Caja { n, x, y, contenido, color, tamano, resp } => {
-                            let r = match &mut abierto {
-                                None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => anotar_caja(doc, n, x, y, &contenido, color, tamano).map(|xref| {
+                                Some((doc, _)) => anotar_caja(doc, n, x, y, &contenido, color, tamano, postit).map(|xref| {
                                     hechas.push(Hecho::Anotacion { n, xref });
                                     cache.olvidar_pagina(n);
                                 }),
@@ -630,7 +612,8 @@ impl Motor {
         rx.recv().map_err(texto)?
     }
 
-    pub fn anotar_nota(
+    #[allow(clippy::too_many_arguments)]
+    pub fn anotar_caja(
         &self,
         n: i32,
         x: f32,
@@ -638,15 +621,10 @@ impl Motor {
         contenido: String,
         color: (f32, f32, f32),
         tamano: f32,
+        postit: bool,
     ) -> Result<(), String> {
         let (tx, rx) = mpsc::channel();
-        self.0.send(Pedido::Nota { n, x, y, contenido, color, tamano, resp: tx }).map_err(texto)?;
-        rx.recv().map_err(texto)?
-    }
-
-    pub fn anotar_caja(&self, n: i32, x: f32, y: f32, contenido: String, color: (f32, f32, f32), tamano: f32) -> Result<(), String> {
-        let (tx, rx) = mpsc::channel();
-        self.0.send(Pedido::Caja { n, x, y, contenido, color, tamano, resp: tx }).map_err(texto)?;
+        self.0.send(Pedido::Caja { n, x, y, contenido, color, tamano, postit, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
@@ -987,38 +965,8 @@ fn anotar_tinta(
     annot.xref().map_err(texto)
 }
 
-/// Nota con el icono en la página; el texto se lee al abrir la nota en cualquier lector.
-fn anotar_nota(
-    doc: &mut PdfDocument,
-    n: i32,
-    x: f32,
-    y: f32,
-    contenido: &str,
-    color: (f32, f32, f32),
-    tamano: f32,
-) -> Result<i32, String> {
-    let contenido = contenido.trim();
-    if contenido.is_empty() {
-        return Err("Escribe la nota.".into());
-    }
-    let pagina = doc.load_page(n).map_err(texto)?;
-    let caja = pagina.bounds().map_err(texto)?;
-    if caja.width() <= 0.0 || caja.height() <= 0.0 {
-        return Err("La página está vacía.".into());
-    }
-    // Un ícono más grande se puede tocar con el dedo y se ve mejor.
-    let lado = tamano.clamp(16.0, 96.0).min(caja.width() * 0.3);
-    let x0 = (caja.x0 + x.clamp(0.0, 1.0) * caja.width()).min(caja.x1 - lado).max(caja.x0);
-    let y0 = (caja.y0 + y.clamp(0.0, 1.0) * caja.height()).min(caja.y1 - lado).max(caja.y0);
-    let rect = Rect::new(x0, y0, x0 + lado, y0 + lado);
-    let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
-    let mut annot = pdf.add_text_annotation(rect, contenido).map_err(texto)?;
-    annot.set_color(anotacion_color(color)).map_err(texto)?;
-    annot.update().map_err(texto)?;
-    annot.xref().map_err(texto)
-}
-
 /// Cuadro de texto: se abre desde el toque hacia la derecha y abajo.
+#[allow(clippy::too_many_arguments)]
 fn anotar_caja(
     doc: &mut PdfDocument,
     n: i32,
@@ -1027,6 +975,7 @@ fn anotar_caja(
     contenido: &str,
     color: (f32, f32, f32),
     tamano: f32,
+    postit: bool,
 ) -> Result<i32, String> {
     let contenido = contenido.trim();
     if contenido.is_empty() {
@@ -1046,6 +995,10 @@ fn anotar_caja(
     annot
         .set_default_appearance("Helv", tamano, Some(anotacion_color(color)))
         .map_err(texto)?;
+    // La nota es como un papelito pegado: el color de una FreeText es el relleno del cuadro.
+    if postit {
+        annot.set_color(AnnotationColor::Rgb { red: 1.0, green: 0.95, blue: 0.62 }).map_err(texto)?;
+    }
     poner_borde(&mut annot, tamano, rect)?;
     annot.update().map_err(texto)?;
     annot.xref().map_err(texto)
@@ -1834,7 +1787,7 @@ trailer<</Root 1 0 R>>
         let original = carpeta.join("original.pdf").to_string_lossy().into_owned();
         let copia = carpeta.join("copia.pdf").to_string_lossy().into_owned();
         let mut doc = doc_de(300.0, 400.0);
-        anotar_caja(&mut doc, 0, 0.1, 0.1, "SECRETO-123", (0.0, 0.0, 0.0), 12.0).unwrap();
+        anotar_caja(&mut doc, 0, 0.1, 0.1, "SECRETO-123", (0.0, 0.0, 0.0), 12.0, false).unwrap();
         guardar_doc(&doc, &original).unwrap();
         let mut doc = PdfDocument::open(&original).unwrap();
         let xref = doc.load_pdf_page(0).unwrap().annotations().next().unwrap().xref().unwrap();
@@ -1923,6 +1876,16 @@ trailer<</Root 1 0 R>>
     }
 
     #[test]
+    fn la_nota_lleva_fondo_amarillo_y_lo_conserva_al_moverla() {
+        let mut doc = doc_de(300.0, 400.0);
+        let nota = anotar_caja(&mut doc, 0, 0.1, 0.1, "Nota", (0.0, 0.0, 0.0), 12.0, true).unwrap();
+        let texto = anotar_caja(&mut doc, 0, 0.1, 0.5, "Texto", (0.0, 0.0, 0.0), 12.0, false).unwrap();
+        mover_anotacion(&mut doc, 0, nota, 0.2, 0.0).unwrap();
+        assert!(matches!(anotacion(&doc, 0, nota).color().unwrap(), Some(AnnotationColor::Rgb { .. })));
+        assert!(anotacion(&doc, 0, texto).color().unwrap().is_none());
+    }
+
+    #[test]
     fn el_cuadro_de_texto_queda_pegado_al_texto() {
         let (ancho, alto) = medida_texto("Texto", 12.0, 500.0).unwrap();
         // "Texto" en Helvetica 12 mide unos 30 puntos; antes el cuadro salía de 60 o más.
@@ -1943,7 +1906,7 @@ trailer<</Root 1 0 R>>
     #[test]
     fn un_texto_nuevo_y_al_agrandarlo_el_cuadro_sigue_al_texto() {
         let mut doc = doc_de(300.0, 400.0);
-        let xref = anotar_caja(&mut doc, 0, 0.1, 0.1, "Texto", (0.0, 0.0, 0.0), 12.0).unwrap();
+        let xref = anotar_caja(&mut doc, 0, 0.1, 0.1, "Texto", (0.0, 0.0, 0.0), 12.0, false).unwrap();
         let antes = datos_de(&doc, 0, xref).unwrap().rect;
         assert!(antes.width() < 42.0, "{antes:?}");
         // Arrastrar la esquina al doble: la letra crece y el cuadro vuelve a pegarse a ella.

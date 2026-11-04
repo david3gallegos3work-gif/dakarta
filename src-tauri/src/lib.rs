@@ -72,21 +72,6 @@ async fn anotar_tinta(
 }
 
 #[tauri::command]
-async fn anotar_nota(
-    motor: State<'_, Motor>,
-    pagina: i32,
-    x: f32,
-    y: f32,
-    contenido: String,
-    rojo: f32,
-    verde: f32,
-    azul: f32,
-    tamano: f32,
-) -> Result<(), String> {
-    motor.anotar_nota(pagina, x, y, contenido, (rojo, verde, azul), tamano)
-}
-
-#[tauri::command]
 async fn anotar_caja(
     motor: State<'_, Motor>,
     pagina: i32,
@@ -97,8 +82,9 @@ async fn anotar_caja(
     verde: f32,
     azul: f32,
     tamano: f32,
+    postit: bool,
 ) -> Result<(), String> {
-    motor.anotar_caja(pagina, x, y, contenido, (rojo, verde, azul), tamano)
+    motor.anotar_caja(pagina, x, y, contenido, (rojo, verde, azul), tamano, postit)
 }
 
 #[tauri::command]
@@ -295,7 +281,6 @@ pub fn run() {
     mostrar_archivo,
     anotar_texto,
     anotar_tinta,
-    anotar_nota,
     anotar_caja,
     anotar_sello,
     anotaciones,
