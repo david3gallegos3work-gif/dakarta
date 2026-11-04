@@ -15,7 +15,8 @@ export function esMasNueva(a: string, b: string) {
   return false
 }
 
-export async function buscarActualizacion(): Promise<Actualizacion | null> {
+/** La última versión publicada y, si ya está, el archivo para este aparato. null: no se pudo consultar. */
+export async function ultimaVersion(): Promise<{ version: string; url: string | null } | null> {
   try {
     const r = await fetch(ULTIMA, { headers: { Accept: 'application/vnd.github+json' } })
     if (!r.ok) return null
@@ -25,8 +26,17 @@ export async function buscarActualizacion(): Promise<Actualizacion | null> {
     const nombre = /android/i.test(navigator.userAgent) ? `Dakarta-${version}.apk` : `Dakarta-Windows-${version}.exe`
     // Mientras se publica, una versión puede tener aún solo uno de los dos archivos: se avisa cuando esté el de este aparato.
     const archivo = ultima.assets.find((a) => a.name === nombre)
-    return archivo && esMasNueva(version, await getVersion()) ? { version, url: archivo.browser_download_url } : null
+    return { version, url: archivo?.browser_download_url ?? null }
   } catch {
     return null // sin internet: se vuelve a mirar la próxima vez que se abra la app
+  }
+}
+
+export async function buscarActualizacion(): Promise<Actualizacion | null> {
+  const ultima = await ultimaVersion()
+  try {
+    return ultima?.url && esMasNueva(ultima.version, await getVersion()) ? { version: ultima.version, url: ultima.url } : null
+  } catch {
+    return null
   }
 }
