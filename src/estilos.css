@@ -60,8 +60,11 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 
 /* Cajas invisibles sobre las anotaciones: se tocan para elegir y arrastrar para mover. */
 /* La caja de toque es invisible: solo se marca la anotación elegida. */
-.anot { position: absolute; z-index: 2; min-width: 28px; min-height: 28px; border: 0; border-radius: 3px; background: transparent; touch-action: none; cursor: grab; }
+.anot { position: absolute; z-index: 2; border: 0; border-radius: 3px; background: transparent; touch-action: none; cursor: grab; }
 .anot.seleccionada { border: 2px solid #f57c00; background: rgba(245, 124, 0, 0.12); cursor: grabbing; }
+/* Esquina para agrandar o achicar la anotación elegida. */
+.anot .tirador { position: absolute; right: -10px; bottom: -10px; width: 20px; height: 20px; border: 2px solid #fff; border-radius: 50%; background: #f57c00; box-shadow: 0 0 0 1px #f57c00; touch-action: none; cursor: nwse-resize; }
+.noche .anot .tirador { background: #ffb74d; box-shadow: 0 0 0 1px #ffb74d; }
 
 /* Panel de la anotación elegida. */
 .fila-seleccion { flex-wrap: wrap; align-items: flex-start; padding: 6px; border: 1px solid #cfd8e3; border-radius: 6px; background: #f5f8fc; }
