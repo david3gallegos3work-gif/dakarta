@@ -1,6 +1,7 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import logo from '../assets/logo.jpg'
+import { AcercaDe } from './AcercaDe.tsx'
 import { guardarReciente, leerRecientes, marcarAbriendo, olvidarReciente, seCerroAbriendo, type Reciente } from './recientes.ts'
 import { buscarActualizacion, type Actualizacion } from './version.ts'
 import { ANCHO_ENTERA_MAX, anchoEntera, imanZoom, limitarZoom, MINIATURA, recorte, type Recorte } from './zoom.ts'
@@ -240,6 +241,7 @@ export default function App() {
   const [hechas, setHechas] = useState(0)
   const [avisoEdicion, setAvisoEdicion] = useState(false)
   const [pregunta, setPregunta] = useState<Pregunta | null>(null)
+  const [verAcerca, setVerAcerca] = useState(false)
   /** Android: "Salir" del cuadro deja pasar el siguiente "atrás" sin volver a preguntar. */
   const saliendo = useRef(false)
   const [ayudaManual, setAyudaManual] = useState(false)
@@ -700,6 +702,8 @@ export default function App() {
     }
   }
 
+  const avisar = (texto: string, esError?: boolean) => (esError ? setError(texto) : setExito(texto))
+
   /** Con cambios sin guardar, pregunta antes de abrir otro PDF; si no hay, lo abre directo. */
   const siPuedeCambiar = (abrirOtro: () => void) => {
     if (!sucioRef.current) return abrirOtro()
@@ -1115,6 +1119,10 @@ export default function App() {
         setPregunta(null)
         return true
       }
+      if (verAcerca) {
+        setVerAcerca(false)
+        return true
+      }
       if (verIndice) {
         setVerIndice(false)
         return true
@@ -1140,7 +1148,7 @@ export default function App() {
     return () => {
       delete window.DakartaAtras
     }
-  }, [verIndice, verBuscar, cerrarBuscar, sucio, pregunta])
+  }, [verIndice, verBuscar, cerrarBuscar, sucio, pregunta, verAcerca])
 
   // Windows: avisar antes de cerrar la ventana si hay cambios sin guardar.
   useEffect(() => {
@@ -1546,6 +1554,9 @@ export default function App() {
             ) : (
               <p>Este documento no tiene índice.</p>
             )}
+            <button className="version-indice" onClick={() => setVerAcerca(true)}>
+              Dakarta · versión y descargas
+            </button>
           </nav>
         )}
         <div
@@ -1737,6 +1748,10 @@ export default function App() {
                 </ul>
               </div>
             )}
+            <details className="panel-acerca">
+              <summary>Dakarta · versión y descargas</summary>
+              <AcercaDe onAviso={avisar} />
+            </details>
             <p className="creditos">
               Gratis, sin anuncios y sin rastreo. Motor PDF: MuPDF © Artifex Software, Inc. Licencia AGPL-3.0.
             </p>
@@ -1768,6 +1783,23 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {verAcerca && (
+        <div className="fondo-aviso" role="dialog" aria-modal="true" aria-labelledby="titulo-acerca" onClick={() => setVerAcerca(false)}>
+          <div className="tarjeta-aviso" onClick={(e) => e.stopPropagation()}>
+            <h2 id="titulo-acerca">Dakarta</h2>
+            <AcercaDe onAviso={avisar} />
+            <p className="nota-ayuda">
+              Gratis, sin anuncios y sin rastreo. Motor PDF: MuPDF © Artifex Software, Inc. Licencia AGPL-3.0.
+            </p>
+            <div className="fila-botones">
+              <button className="grande" onClick={() => setVerAcerca(false)}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {pregunta && (
         <div className="fondo-aviso" role="dialog" aria-modal="true" aria-labelledby="titulo-pregunta">
