@@ -172,14 +172,29 @@ class PuenteDakarta(private val actividad: android.app.Activity) {
     return d
   }
 
-  /** Copia la copia editada de la caché al destino elegido por el usuario. */
+  /** Copia la copia editada de la caché al destino elegido por el usuario. La de la caché se borra
+   *  siempre (puede pesar tanto como el PDF); si la copia falla, se borra el archivo a medias del destino. */
   @android.webkit.JavascriptInterface
-  fun copiar(destino: String, origen: String): Boolean = try {
-    actividad.contentResolver.openOutputStream(android.net.Uri.parse(destino))?.use { salida ->
-      java.io.File(origen).inputStream().use { entrada -> entrada.copyTo(salida) }
-      true
-    } ?: false
-  } catch (_: Exception) { false }
+  fun copiar(destino: String, origen: String): Boolean {
+    val archivo = java.io.File(origen)
+    val listo = try {
+      actividad.contentResolver.openOutputStream(android.net.Uri.parse(destino), "wt")?.use { salida ->
+        archivo.inputStream().use { entrada -> entrada.copyTo(salida) }
+        true
+      } ?: false
+    } catch (_: Exception) { false }
+    archivo.delete()
+    if (!listo) borrar(destino)
+    return listo
+  }
+
+  /** Quita el archivo que se creó al elegir el destino, cuando al final no se pudo guardar nada en él. */
+  @android.webkit.JavascriptInterface
+  fun borrar(destino: String) {
+    try {
+      android.provider.DocumentsContract.deleteDocument(actividad.contentResolver, android.net.Uri.parse(destino))
+    } catch (_: Exception) { }
+  }
 
   /** Selector del sistema con permiso guardable; el archivo vuelve por onActivityResult. */
   @android.webkit.JavascriptInterface
