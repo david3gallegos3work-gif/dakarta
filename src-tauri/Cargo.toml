@@ -1,6 +1,6 @@
 [package]
 name = "dakarta"
-version = "0.2.8"
+version = "0.2.9"
 description = "Dakarta: lector de PDF sin anuncios"
 license = "AGPL-3.0-or-later"
 edition = "2024"
