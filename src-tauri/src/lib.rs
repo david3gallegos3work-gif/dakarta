@@ -45,13 +45,12 @@ async fn anotar_texto(
     rojo: f32,
     verde: f32,
     azul: f32,
-    grosor: f32,
     x0: f32,
     y0: f32,
     x1: f32,
     y1: f32,
 ) -> Result<(), String> {
-    motor.anotar_texto(pagina, &tipo, (rojo, verde, azul), grosor, (x0, y0), (x1, y1))
+    motor.anotar_texto(pagina, &tipo, (rojo, verde, azul), (x0, y0), (x1, y1))
 }
 
 #[tauri::command]

@@ -88,7 +88,7 @@ pub struct Anotacion {
     rojo: f32,
     verde: f32,
     azul: f32,
-    /// Tamaño de letra en textos, o grosor de línea en trazos y subrayados.
+    /// Tamaño de letra en textos, o grosor de línea en trazos.
     tamano: f32,
     /// Caja en fracción de la página (0 a 1).
     x: f32,
@@ -206,7 +206,6 @@ enum Pedido {
         n: i32,
         tipo: TipoTexto,
         color: (f32, f32, f32),
-        grosor: f32,
         a: (f32, f32),
         b: (f32, f32),
         resp: Sender<Result<(), String>>,
@@ -309,10 +308,10 @@ impl Motor {
                             };
                             let _ = resp.send(r);
                         }
-                        Pedido::Texto { n, tipo, color, grosor, a, b, resp } => {
+                        Pedido::Texto { n, tipo, color, a, b, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => anotar_texto(doc, n, tipo, color, grosor, a, b).map(|xref| {
+                                Some((doc, _)) => anotar_texto(doc, n, tipo, color, a, b).map(|xref| {
                                     hechas.push(Hecho::Anotacion { n, xref });
                                     cache.olvidar_pagina(n);
                                 }),
@@ -520,7 +519,6 @@ impl Motor {
         n: i32,
         tipo: &str,
         color: (f32, f32, f32),
-        grosor: f32,
         a: (f32, f32),
         b: (f32, f32),
     ) -> Result<(), String> {
@@ -531,7 +529,7 @@ impl Motor {
             _ => return Err("Herramienta no válida.".into()),
         };
         let (tx, rx) = mpsc::channel();
-        self.0.send(Pedido::Texto { n, tipo, color, grosor, a, b, resp: tx }).map_err(texto)?;
+        self.0.send(Pedido::Texto { n, tipo, color, a, b, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
@@ -750,7 +748,6 @@ fn anotar_texto(
     n: i32,
     tipo: TipoTexto,
     color: (f32, f32, f32),
-    grosor: f32,
     a: (f32, f32),
     b: (f32, f32),
 ) -> Result<i32, String> {
@@ -817,9 +814,8 @@ fn anotar_texto(
     annot.set_color(anotacion_color(color)).map_err(texto)?;
     if matches!(tipo, TipoTexto::Resaltar) {
         annot.set_opacity(0.4).map_err(texto)?;
-    } else {
-        annot.set_border_width(grosor.clamp(0.5, 20.0)).map_err(texto)?;
     }
+    // Subrayar y tachar no admiten grosor propio: MuPDF lo calcula del alto de la palabra.
     annot.update().map_err(texto)?;
     annot.xref().map_err(texto)
 }
@@ -924,8 +920,6 @@ fn anotar_caja(
     annot
         .set_default_appearance("Helv", tamano, Some(anotacion_color(color)))
         .map_err(texto)?;
-    annot.set_color(anotacion_color(color)).map_err(texto)?;
-    annot.set_border_width(1.0).map_err(texto)?;
     annot.update().map_err(texto)?;
     annot.xref().map_err(texto)
 }
@@ -956,9 +950,7 @@ fn anotar_sello(
     annot
         .set_default_appearance("Helv", tamano, Some(anotacion_color(color)))
         .map_err(texto)?;
-    annot.set_color(anotacion_color(color)).map_err(texto)?;
     annot.set_quadding(AnnotationTextAlign::Center).map_err(texto)?;
-    annot.set_border_width(2.0).map_err(texto)?;
     annot.update().map_err(texto)?;
     annot.xref().map_err(texto)
 }
@@ -1014,10 +1006,19 @@ fn leer_datos(a: &PdfAnnotation) -> Result<Option<DatosAnotacion>, String> {
         TipoAnot::Nota | TipoAnot::Resaltar => (1.0, 0.8, 0.0),
         _ => (0.0, 0.0, 0.0),
     };
-    let color = color_de(a.color().map_err(texto)?, por_defecto);
+    // En FreeText, el color C es el relleno del cuadro; el color de las letras está en la apariencia.
+    let apariencia = if tipo == TipoAnot::Texto { a.default_appearance().map_err(texto)? } else { None };
+    let color = if tipo == TipoAnot::Texto {
+        apariencia
+            .as_ref()
+            .and_then(|d| d.color)
+            .map_or((0.0, 0.0, 0.0), |c| color_de(Some(c), (0.0, 0.0, 0.0)))
+    } else {
+        color_de(a.color().map_err(texto)?, por_defecto)
+    };
     let tamano = match tipo {
         TipoAnot::Nota => rect.width(),
-        TipoAnot::Texto => a.default_appearance().map_err(texto)?.map(|d| d.size).unwrap_or(12.0),
+        TipoAnot::Texto => apariencia.as_ref().map(|d| d.size).unwrap_or(12.0),
         _ => a.border_width().map_err(texto).unwrap_or(1.0),
     };
     let opacidad = a.opacity().map_err(texto).unwrap_or(1.0);
@@ -1108,9 +1109,8 @@ fn aplicar_datos(a: &mut PdfAnnotation, d: &DatosAnotacion) -> Result<(), String
         }
         TipoAnot::Texto => {
             a.set_contents(&d.contenido).map_err(texto)?;
+            // El color de una FreeText se usa como relleno del cuadro: aquí solo va el color del texto.
             a.set_default_appearance("Helv", d.tamano, Some(anotacion_color(d.color))).map_err(texto)?;
-            a.set_color(anotacion_color(d.color)).map_err(texto)?;
-            a.set_border_width(1.0).map_err(texto)?;
         }
         TipoAnot::Tinta => {
             a.set_color(anotacion_color(d.color)).map_err(texto)?;
@@ -1124,7 +1124,6 @@ fn aplicar_datos(a: &mut PdfAnnotation, d: &DatosAnotacion) -> Result<(), String
         }
         TipoAnot::Subrayar | TipoAnot::Tachar => {
             a.set_color(anotacion_color(d.color)).map_err(texto)?;
-            a.set_border_width(d.tamano).map_err(texto)?;
             a.set_quad_points(d.quads.clone()).map_err(texto)?;
         }
     }
