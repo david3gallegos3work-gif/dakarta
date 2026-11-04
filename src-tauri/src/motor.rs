@@ -272,7 +272,9 @@ enum Pedido {
         contenido: Option<String>,
         color: Option<(f32, f32, f32)>,
         tamano: Option<f32>,
-        resp: Sender<Result<(), String>>,
+        /// Sigue lo que se está escribiendo: se une al paso anterior de deshacer en vez de crear otro.
+        junto: bool,
+        resp: Sender<Result<bool, String>>,
     },
     Borrar { n: i32, xref: i32, resp: Sender<Result<(), String>> },
     Deshacer { resp: Sender<Result<Option<i32>, String>> },
@@ -418,7 +420,7 @@ impl Motor {
                             };
                             let _ = resp.send(r);
                         }
-                        Pedido::Editar { n, xref, contenido, color, tamano, resp } => {
+                        Pedido::Editar { n, xref, contenido, color, tamano, junto, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
                                 Some((doc, _)) => datos_de(doc, n, xref).and_then(|antes| {
@@ -426,8 +428,14 @@ impl Motor {
                                         for h in hechas.iter_mut() {
                                             h.cambiar_xref(xref, nuevo);
                                         }
-                                        hechas.push(Hecho::Cambio { n, xref: nuevo, antes });
                                         cache.olvidar_pagina(n);
+                                        // Mientras se escribe, todo cuenta como un solo paso: deshacer vuelve a como estaba antes de empezar.
+                                        let sigue = junto
+                                            && matches!(hechas.last(), Some(Hecho::Cambio { n: m, xref: x, .. }) if *m == n && *x == nuevo);
+                                        if !sigue {
+                                            hechas.push(Hecho::Cambio { n, xref: nuevo, antes });
+                                        }
+                                        !sigue
                                     })
                                 }),
                             };
@@ -679,9 +687,10 @@ impl Motor {
         contenido: Option<String>,
         color: Option<(f32, f32, f32)>,
         tamano: Option<f32>,
-    ) -> Result<(), String> {
+        junto: bool,
+    ) -> Result<bool, String> {
         let (tx, rx) = mpsc::channel();
-        self.0.send(Pedido::Editar { n, xref, contenido, color, tamano, resp: tx }).map_err(texto)?;
+        self.0.send(Pedido::Editar { n, xref, contenido, color, tamano, junto, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
@@ -1883,6 +1892,26 @@ trailer<</Root 1 0 R>>
         mover_anotacion(&mut doc, 0, nota, 0.2, 0.0).unwrap();
         assert!(matches!(anotacion(&doc, 0, nota).color().unwrap(), Some(AnnotationColor::Rgb { .. })));
         assert!(anotacion(&doc, 0, texto).color().unwrap().is_none());
+    }
+
+    #[test]
+    fn lo_escrito_de_un_tiron_se_deshace_en_un_solo_paso() {
+        let ruta = std::env::temp_dir().join(format!("dakarta-tanda-{}.pdf", std::process::id()));
+        let ruta = ruta.to_string_lossy().into_owned();
+        guardar_doc(&doc_de(300.0, 400.0), &ruta).unwrap();
+        let motor = Motor::nuevo();
+        motor.abrir(ruta.clone(), None).unwrap();
+        motor.anotar_caja(0, 0.1, 0.1, "Nota".into(), (0.0, 0.0, 0.0), 12.0, true).unwrap();
+        let xref = motor.anotaciones(0).unwrap()[0].xref;
+        let negro = Some((0.0, 0.0, 0.0));
+        // Tres pausas mientras se escribe: el primer guardado abre el paso, los siguientes se le unen.
+        assert!(motor.editar_anotacion(0, xref, Some("Nota de".into()), negro, None, false).unwrap());
+        assert!(!motor.editar_anotacion(0, xref, Some("Nota de prueba".into()), negro, None, true).unwrap());
+        assert!(!motor.editar_anotacion(0, xref, Some("Nota de prueba\nlarga".into()), negro, None, true).unwrap());
+        assert_eq!(motor.anotaciones(0).unwrap()[0].contenido, "Nota de prueba\nlarga");
+        motor.deshacer().unwrap();
+        assert_eq!(motor.anotaciones(0).unwrap()[0].contenido, "Nota");
+        std::fs::remove_file(&ruta).unwrap();
     }
 
     #[test]

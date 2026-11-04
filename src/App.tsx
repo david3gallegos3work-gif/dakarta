@@ -990,13 +990,14 @@ export default function App() {
   )
 
   const aplicarAnotacion = useCallback(
-    async (a: Anotacion, cambios: { contenido?: string; color?: string; tamano?: number }) => {
+    async (a: Anotacion, cambios: { contenido?: string; color?: string; tamano?: number; junto?: boolean }) => {
       const [rojo, verde, azul] = rgb(cambios.color ?? hex(a.rojo, a.verde, a.azul))
       const args: Record<string, unknown> = { pagina: a.pagina, xref: a.xref, rojo, verde, azul }
       if (cambios.contenido !== undefined) args.contenido = cambios.contenido
       if (cambios.tamano !== undefined) args.tamano = cambios.tamano
+      if (cambios.junto) args.junto = true
       try {
-        await invoke('editar_anotacion', args)
+        const nuevoPaso = await invoke<boolean>('editar_anotacion', args)
         // Sigue elegida: así los cambios de color y tamaño se ven y se pueden seguir tocando.
         setSeleccion((s) =>
           s && s.xref === a.xref
@@ -1005,7 +1006,7 @@ export default function App() {
         )
         refrescar(a.pagina)
         setSucio(true)
-        setHechas((h) => h + 1)
+        if (nuevoPaso) setHechas((h) => h + 1)
       } catch (e) {
         fallo(e)
       }
@@ -2501,7 +2502,7 @@ function PanelAnotacion({
   onCerrar,
 }: {
   a: Anotacion
-  onAplicar: (cambios: { contenido?: string; color?: string; tamano?: number }) => void
+  onAplicar: (cambios: { contenido?: string; color?: string; tamano?: number; junto?: boolean }) => void
   onBorrar: () => void
   onCerrar: () => void
 }) {
@@ -2513,15 +2514,23 @@ function PanelAnotacion({
   const conTexto = a.tipo === 'nota' || a.tipo === 'texto'
   const colores = a.tipo === 'resaltar' ? COLORES_RESALTADO : COLORES_FUERTES
   const tamanos = a.tipo === 'texto' ? TAMANOS_TEXTO : a.tipo === 'tinta' ? GROSORES : null
-  // El texto se guarda al salir del cuadro; el color y el tamaño, al tocarlos. No hace falta "Aplicar".
-  // Se recuerda lo último guardado: al tocar "Cerrar" el cuadro ya guardó al perder el foco, y no debe
-  // quedar un segundo paso de deshacer con el mismo texto.
+  // El texto se va viendo en la hoja mientras se escribe: se guarda en cada pausa corta. El color y el
+  // tamaño, al tocarlos. No hace falta "Aplicar". Todo lo escrito de un tirón es un solo paso de deshacer.
   const guardado = useRef(a.contenido)
-  const guardarTexto = () => {
-    const limpio = texto.trim()
+  const enTanda = useRef(false)
+  const reloj = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(reloj.current), [])
+  const guardar = (valor: string) => {
+    clearTimeout(reloj.current)
+    const limpio = valor.trim()
     if (!conTexto || !limpio || limpio === guardado.current.trim()) return
-    guardado.current = texto
-    onAplicar({ contenido: texto })
+    guardado.current = valor
+    onAplicar({ contenido: valor, junto: enTanda.current })
+    enTanda.current = true
+  }
+  const guardarTexto = () => {
+    guardar(texto)
+    enTanda.current = false
   }
   return (
     <div className="fila-seleccion">
@@ -2529,7 +2538,12 @@ function PanelAnotacion({
       {conTexto && (
         <textarea
           value={texto}
-          onChange={(e) => setTexto(e.currentTarget.value)}
+          onChange={(e) => {
+            const valor = e.currentTarget.value
+            setTexto(valor)
+            clearTimeout(reloj.current)
+            reloj.current = setTimeout(() => guardar(valor), 350)
+          }}
           onBlur={guardarTexto}
           placeholder={a.tipo === 'nota' ? 'Texto de la nota' : 'Texto'}
           aria-label={a.tipo === 'nota' ? 'Texto de la nota' : 'Texto'}
