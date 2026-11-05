@@ -24,6 +24,7 @@ mod capas;
 mod formulario;
 mod organizar;
 mod pintar;
+mod word;
 
 use anotar::*;
 use busqueda::*;
@@ -812,6 +813,8 @@ const OFFICE_ANTIGUO: &str = "Este archivo es de Office antiguo (.doc, .xls o .p
 
 /// Tamaño de hoja para los formatos de texto corrido (Word, EPUB, TXT…): cómodo de leer en el celular.
 const HOJA_LECTURA: (f32, f32, f32) = (420.0, 600.0, 11.0);
+/// Carta, como Word en América: para los Word que el lector propio no pudo leer.
+const HOJA_CARTA: (f32, f32, f32) = (612.0, 792.0, 11.0);
 
 fn abrir_doc(ruta: &str, nombre: &str) -> Result<(Abierto, Info), String> {
     let t = Instant::now();
@@ -829,9 +832,20 @@ fn abrir_doc(ruta: &str, nombre: &str) -> Result<(Abierto, Info), String> {
         }
         let tipo = tipo_de(nombre, &cabecera).ok_or("Dakarta todavía no sabe abrir este tipo de archivo.")?;
         let bytes = std::fs::read(ruta).map_err(|e| format!("No se pudo abrir este archivo: {e}"))?;
-        let mut doc = Document::from_bytes(&bytes, tipo).map_err(|e| format!("No se pudo abrir este archivo: {e}"))?;
+        // Word: el lector propio respeta el tamaño de hoja, los márgenes y el formato; si no puede, el de MuPDF.
+        let word = (tipo == "docx").then(|| word::convertir(&bytes).ok()).flatten();
+        let (mut doc, hoja) = match word {
+            Some(w) => (
+                Document::from_bytes(&w.datos, w.tipo).map_err(|e| format!("No se pudo abrir este archivo: {e}"))?,
+                (w.ancho, w.alto, w.letra),
+            ),
+            None => (
+                Document::from_bytes(&bytes, tipo).map_err(|e| format!("No se pudo abrir este archivo: {e}"))?,
+                if tipo == "docx" { HOJA_CARTA } else { HOJA_LECTURA },
+            ),
+        };
         if doc.is_reflowable().map_err(texto)? {
-            let (ancho, alto, letra) = HOJA_LECTURA;
+            let (ancho, alto, letra) = hoja;
             doc.layout(ancho, alto, letra).map_err(texto)?;
         }
         Abierto::Otro(doc)

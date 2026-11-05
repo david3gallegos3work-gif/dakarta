@@ -247,3 +247,5 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .recientes-tipo h3 { margin: 10px 0 4px; font-size: 13px; font-weight: 600; color: #607d8b; text-transform: uppercase; letter-spacing: 0.04em; }
 .recientes-tipo + .recientes-tipo { margin-top: 2px; }
 .noche .recientes-tipo h3 { color: #9fb3c8; }
+.recientes-panel .recientes-tipo h3 { margin: 6px 0 3px; font-size: 12px; }
+.recientes-panel .recientes-tipo:first-of-type h3 { margin-top: 0; }
