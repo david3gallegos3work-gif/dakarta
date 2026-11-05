@@ -1,15 +1,117 @@
 //! Organizar páginas: mover, girar, quitar, duplicar o extraer hojas y guardarlo como un PDF nuevo.
-//! El PDF abierto no se toca: se trabaja sobre una copia que ya lleva las anotaciones sin guardar.
+//! También unir varios PDFs. Nada de lo abierto se toca: se trabaja sobre una copia que ya lleva las
+//! anotaciones sin guardar.
+
+use std::collections::HashMap;
 
 use serde::Deserialize;
 
 use super::*;
 
-/// Una hoja del PDF nuevo: de qué página del abierto sale y cuánto se gira (múltiplo de 90).
+/// Una hoja del PDF nuevo: de qué archivo y página sale y cuánto se gira (múltiplo de 90).
 #[derive(Deserialize, Clone, Copy, Debug)]
 pub struct Hoja {
     pub pagina: i32,
     pub giro: i32,
+    /// `ABIERTO` (el PDF abierto) o el número de uno de los PDFs agregados para unir.
+    #[serde(default = "abierto")]
+    pub archivo: i32,
+}
+
+/// La hoja sale del PDF abierto.
+pub const ABIERTO: i32 = -1;
+
+fn abierto() -> i32 {
+    ABIERTO
+}
+
+/// Lo que una hoja copia de su original al unirla a otro PDF (nada que apunte a otras páginas).
+const COPIAR: [&str; 9] = ["Contents", "Resources", "MediaBox", "CropBox", "BleedBox", "TrimBox", "ArtBox", "Rotate", "UserUnit"];
+
+/// Une hojas de varios PDFs (el abierto y los agregados) en un PDF nuevo, en el orden de `hojas`.
+/// Se parte de una copia del primero que aparece y se le agregan las hojas de los demás con sus
+/// anotaciones; las casillas de formulario solo se conservan las del primero.
+pub(super) fn unir_y_guardar(
+    abierto: Option<&PdfDocument>,
+    agregados: &[&PdfDocument],
+    hojas: &[Hoja],
+    destino: &str,
+) -> Result<(), String> {
+    if hojas.is_empty() {
+        return Err("No quedó ninguna página para guardar.".into());
+    }
+    let fuente = |a: i32| -> Result<&PdfDocument, String> {
+        if a == ABIERTO {
+            abierto.ok_or_else(|| "No hay un documento abierto".into())
+        } else {
+            usize::try_from(a).ok().and_then(|i| agregados.get(i).copied()).ok_or_else(|| "Falta uno de los PDFs para unir.".into())
+        }
+    };
+    let mut orden: Vec<i32> = Vec::new();
+    for h in hojas {
+        let total = fuente(h.archivo)?.page_count().map_err(texto)?;
+        if h.pagina < 0 || h.pagina >= total || h.giro % 90 != 0 {
+            return Err("La lista de páginas no es válida.".into());
+        }
+        if !orden.contains(&h.archivo) {
+            orden.push(h.archivo);
+        }
+    }
+    let temporal = format!("{destino}.uniendo");
+    guardar_doc(fuente(orden[0])?, &temporal)?;
+    let r = PdfDocument::open(&temporal).map_err(texto).and_then(|mut copia| {
+        let mut inicio = HashMap::from([(orden[0], 0)]);
+        for &a in &orden[1..] {
+            inicio.insert(a, copia.page_count().map_err(texto)?);
+            agregar_paginas(&mut copia, fuente(a)?)?;
+        }
+        let juntas: Vec<Hoja> =
+            hojas.iter().map(|h| Hoja { pagina: inicio[&h.archivo] + h.pagina, giro: h.giro, archivo: ABIERTO }).collect();
+        reordenar(&mut copia, &juntas)?;
+        guardar_doc(&copia, destino)
+    });
+    let _ = std::fs::remove_file(&temporal);
+    r
+}
+
+/// Agrega al final de `destino` todas las hojas de `origen`, copiadas tal cual (sin volver a dibujarlas).
+fn agregar_paginas(destino: &mut PdfDocument, origen: &PdfDocument) -> Result<(), String> {
+    let mut mapa = destino.new_graft_map().map_err(texto)?;
+    for i in 0..origen.page_count().map_err(texto)? {
+        let original = origen.find_page(i).map_err(texto)?;
+        let mut nueva = destino.new_dict().map_err(texto)?;
+        nueva.dict_put("Type", PdfObject::new_name("Page").map_err(texto)?).map_err(texto)?;
+        for clave in COPIAR {
+            if let Some(v) = original.get_dict_inheritable(clave).map_err(texto)? {
+                nueva.dict_put(clave, mapa.graft_object(&v).map_err(texto)?).map_err(texto)?;
+            }
+        }
+        let mut referencia = destino.add_object(&nueva).map_err(texto)?;
+        let al_final = destino.page_count().map_err(texto)?;
+        destino.insert_page(al_final, &referencia).map_err(texto)?;
+        let Some(anotaciones) = original.get_dict("Annots").map_err(texto)? else { continue };
+        let mut lista = destino.new_array().map_err(texto)?;
+        for j in 0..anotaciones.len().map_err(texto)? as i32 {
+            let Some(a) = anotaciones.get_array(j).map_err(texto)? else { continue };
+            let tipo = a.get_dict("Subtype").map_err(texto)?.map(|t| nombre(&t)).unwrap_or_default();
+            if matches!(tipo.as_str(), "Widget" | "Popup") {
+                continue;
+            }
+            let mut copia = destino.new_dict().map_err(texto)?;
+            for k in 0..a.dict_len().map_err(texto)? as i32 {
+                let (Some(clave), Some(v)) = (a.get_dict_key(k).map_err(texto)?, a.get_dict_val(k).map_err(texto)?) else {
+                    continue;
+                };
+                if !matches!(nombre(&clave).as_str(), "P" | "Popup" | "Parent" | "IRT") {
+                    copia.dict_put(clave, mapa.graft_object(&v).map_err(texto)?).map_err(texto)?;
+                }
+            }
+            copia.dict_put("P", referencia.clone()).map_err(texto)?;
+            lista.array_push(destino.add_object(&copia).map_err(texto)?).map_err(texto)?;
+        }
+        referencia.dict_put("Annots", lista).map_err(texto)?;
+    }
+    Ok(())
 }
 
 /// Lo que una hoja puede heredar de más arriba: se le deja puesto para que no dependa del orden.

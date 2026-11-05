@@ -244,3 +244,13 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .noche .organizar-acciones { background: #242424; border-color: #3a3a3a; }
 .noche .organizar-acciones button { background: #2f2f2f; border-color: #555; }
 .noche .organizar-acciones .grande { background: #1565c0; }
+
+/* Unir PDFs: la lista de archivos con su color y el botón de la pantalla de inicio. */
+.organizar-archivos { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 6px 12px; list-style: none; background: #fff; border-bottom: 1px solid #cfd8e3; font-size: 13px; }
+.organizar-archivos li { display: flex; align-items: center; gap: 6px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.organizar-color { flex: none; width: 12px; height: 12px; border-radius: 3px; }
+.ficha { border-bottom-width: 4px; }
+.unir-inicio { padding: 10px 24px; border: 1px solid #1565c0; border-radius: 8px; background: #fff; color: #1565c0; font: inherit; font-size: 16px; cursor: pointer; }
+.unir-inicio:disabled { opacity: 0.5; }
+.noche .organizar-archivos { background: #242424; border-color: #3a3a3a; }
+.noche .unir-inicio { background: #1e1e1e; color: #90caf9; border-color: #90caf9; }

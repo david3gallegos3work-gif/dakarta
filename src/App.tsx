@@ -15,9 +15,18 @@ import {
   TAMANOS_TEXTO,
 } from './opciones.ts'
 import { Organizar } from './Organizar.tsx'
+import { ABIERTO, type Fuente } from './organizar.ts'
 import { Paginas } from './Paginas.tsx'
 import { Indice, Paleta, PanelAnotacion, Tamanos } from './Paneles.tsx'
-import { guardarReciente, leerRecientes, marcarAbriendo, olvidarReciente, seCerroAbriendo, type Reciente } from './recientes.ts'
+import {
+  guardarReciente,
+  leerRecientes,
+  marcarAbriendo,
+  nombreLegible,
+  olvidarReciente,
+  seCerroAbriendo,
+  type Reciente,
+} from './recientes.ts'
 import type {
   Ancla,
   Anotacion,
@@ -121,7 +130,11 @@ export default function App() {
   const [avisoEdicion, setAvisoEdicion] = useState(false)
   const [pregunta, setPregunta] = useState<Pregunta | null>(null)
   const [verAcerca, setVerAcerca] = useState(false)
-  const [verOrganizar, setVerOrganizar] = useState(false)
+  // Pantalla de organizar páginas (un PDF) o de unir PDFs, con los PDFs cuyas hojas muestra al abrirse.
+  const [organizar, setOrganizar] = useState<{ unir: boolean; fuentes: Fuente[] } | null>(null)
+  // Android: el selector devuelve el PDF elegido para unir por el mismo camino que «Abrir con».
+  const esperandoAgregado = useRef<((ruta: string | null) => void) | null>(null)
+  const salioParaElegir = useRef(false)
   /** Android: "Salir" del cuadro deja pasar el siguiente "atrás" sin volver a preguntar. */
   const saliendo = useRef(false)
   const [ayudaManual, setAyudaManual] = useState(false)
@@ -958,14 +971,53 @@ export default function App() {
     }
   }
 
+  /** El PDF abierto como primera fuente de la pantalla de organizar o unir (con sus cambios sin guardar). */
+  const fuenteAbierta = (d: Doc): Fuente => ({ archivo: ABIERTO, nombre: nombreActual || d.info.nombre, paginas: d.info.paginas })
+
+  const cerrarOrganizar = useCallback(() => {
+    setOrganizar(null)
+    esperandoAgregado.current = null
+    // Los PDFs agregados para unir ya no hacen falta: el motor los suelta.
+    invoke('cerrar_agregados').catch(() => {})
+  }, [])
+
+  /** Unir PDFs: pide uno o más PDFs y los abre en el motor junto al abierto. */
+  const agregarPdf = async (): Promise<Fuente[]> => {
+    try {
+      const puente = window.DakartaAndroid
+      if (puente?.elegir) {
+        const ruta = await new Promise<string | null>((listo) => {
+          esperandoAgregado.current = listo
+          salioParaElegir.current = false
+          puente.elegir!()
+        })
+        if (!ruta) return []
+        const lista = await invoke<Fuente[]>('abrir_agregado', { ruta })
+        let nombre = ''
+        try {
+          nombre = puente.nombre(ruta) ?? ''
+        } catch {
+          // sin nombre de Android: queda el que se sacó de la ruta
+        }
+        return lista.map((f) => ({ ...f, nombre: nombreLegible(nombre || f.nombre) }))
+      }
+      const lista = await invoke<Fuente[]>('abrir_agregado', {})
+      return lista.map((f) => ({ ...f, nombre: nombreLegible(f.nombre) }))
+    } catch (e) {
+      console.error(e)
+      setError('No se pudo abrir ese PDF para unirlo.')
+      return []
+    }
+  }
+
   /**
    * Guarda una copia. Con `organizar`, la copia lleva esas hojas en ese orden: al organizar se abre la
    * copia nueva; al extraer se sigue en el PDF de siempre.
    */
-  const guardarCopia = async (organizar?: { hojas: Hoja[]; extraer: boolean }) => {
-    if (!doc || guardando) return
-    const base = (nombreActual || doc.info.nombre).replace(/\.pdf$/i, '')
-    const sufijo = !organizar ? 'anotado' : organizar.extraer ? 'páginas' : 'organizado'
+  const guardarCopia = async (organizar?: { hojas: Hoja[]; extraer: boolean; unir: boolean }) => {
+    if ((!doc && !organizar?.unir) || guardando) return
+    const base = (doc ? nombreActual || doc.info.nombre : 'PDFs').replace(/\.pdf$/i, '')
+    const sufijo = !organizar ? 'anotado' : organizar.extraer ? 'páginas' : organizar.unir ? 'unido' : 'organizado'
     const nombre = `${base || 'Documento'} (${sufijo}).pdf`
     const hojas = organizar?.hojas
     setGuardando(true)
@@ -995,8 +1047,8 @@ export default function App() {
           setRecientes((lista) => guardarReciente(lista, { ruta: guardada, nombre: nombreDestino }))
           setExito('Páginas extraídas en una copia aparte')
         } else {
-          // El PDF abierto no cambió: se abre la copia organizada para seguir en ella.
-          setVerOrganizar(false)
+          // Ningún PDF cambió: se abre el nuevo (organizado o unido) para seguir en él.
+          cerrarOrganizar()
           cargar(invoke<Info>('abrir_ruta', { ruta: guardada }), { ruta: guardada, nombre: nombreDestino })
         }
         return
@@ -1063,8 +1115,8 @@ export default function App() {
         setVerAcerca(false)
         return true
       }
-      if (verOrganizar) {
-        setVerOrganizar(false)
+      if (organizar) {
+        cerrarOrganizar()
         return true
       }
       if (verIndice) {
@@ -1092,7 +1144,7 @@ export default function App() {
     return () => {
       delete window.DakartaAtras
     }
-  }, [verIndice, verBuscar, cerrarBuscar, sucio, pregunta, verAcerca, verOrganizar])
+  }, [verIndice, verBuscar, cerrarBuscar, sucio, pregunta, verAcerca, organizar, cerrarOrganizar])
 
   // Windows: avisar antes de cerrar la ventana si hay cambios sin guardar.
   useEffect(() => {
@@ -1130,6 +1182,17 @@ export default function App() {
     }
     const pendiente = () => {
       const ruta = window.DakartaAndroid?.pendiente()
+      // Se estaba eligiendo un PDF para unir: va a la pantalla de unir, no se abre. Si al volver no llegó
+      // ninguno, se canceló.
+      const espera = esperandoAgregado.current
+      if (espera) {
+        if (ruta || (document.visibilityState === 'visible' && salioParaElegir.current)) {
+          esperandoAgregado.current = null
+          salioParaElegir.current = false
+          espera(ruta ?? null)
+        }
+        return
+      }
       if (!ruta) return
       siPuedeCambiar(() => abrirRuta(ruta))
     }
@@ -1148,7 +1211,9 @@ export default function App() {
     })
     // Si se sale de la app, el PDF no la cerró: la marca de «abriendo» ya no hace falta.
     const alSalir = () => {
-      if (document.visibilityState === 'hidden') marcarAbriendo(false)
+      if (document.visibilityState !== 'hidden') return
+      marcarAbriendo(false)
+      if (esperandoAgregado.current) salioParaElegir.current = true
     }
     document.addEventListener('visibilitychange', alSalir)
     document.addEventListener('visibilitychange', pendiente)
@@ -1508,10 +1573,19 @@ export default function App() {
               className="version-indice"
               onClick={() => {
                 setVerIndice(false)
-                setVerOrganizar(true)
+                setOrganizar({ unir: false, fuentes: [fuenteAbierta(doc)] })
               }}
             >
               Organizar páginas
+            </button>
+            <button
+              className="version-indice"
+              onClick={() => {
+                setVerIndice(false)
+                setOrganizar({ unir: true, fuentes: [fuenteAbierta(doc)] })
+              }}
+            >
+              Unir con otros PDFs
             </button>
             <button className="version-indice" onClick={() => setVerAcerca(true)}>
               Dakarta · versión y descargas
@@ -1695,6 +1769,9 @@ export default function App() {
             <button className="grande" onClick={abrir} disabled={abriendo}>
               {abriendo ? 'Abriendo…' : 'Abrir un PDF'}
             </button>
+            <button className="unir-inicio" onClick={() => setOrganizar({ unir: true, fuentes: [] })} disabled={abriendo}>
+              Unir PDFs
+            </button>
             {error && <p className="error">{error}</p>}
             {recientes.length > 0 && (
               <div className="recientes">
@@ -1746,12 +1823,14 @@ export default function App() {
         )}
       </div>
 
-      {verOrganizar && doc && (
+      {organizar && (
         <Organizar
-          doc={doc}
+          fuentes={organizar.fuentes}
+          unir={organizar.unir}
+          onAgregar={agregarPdf}
           guardando={guardando}
-          onGuardar={(hojas, extraer) => void guardarCopia({ hojas, extraer })}
-          onCerrar={() => setVerOrganizar(false)}
+          onGuardar={(hojas, extraer) => void guardarCopia({ hojas, extraer, unir: organizar.unir })}
+          onCerrar={cerrarOrganizar}
           aviso={exito}
           error={error}
           onAviso={setError}

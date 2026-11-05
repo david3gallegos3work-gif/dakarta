@@ -103,5 +103,5 @@ export type Preview = {
   puntos: [number, number][]
 }
 
-/** Una hoja del PDF que se guarda al organizar: de qué página sale y cuánto se gira (múltiplo de 90). */
-export type Hoja = { pagina: number; giro: number }
+/** Una hoja del PDF que se guarda al organizar o unir: de qué archivo y página sale y cuánto se gira. */
+export type Hoja = { pagina: number; giro: number; archivo: number }
