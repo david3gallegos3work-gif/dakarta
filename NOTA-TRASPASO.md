@@ -2,7 +2,7 @@
 
 **Fecha y lugar:** 2026-11-03 22:20, en la PC. Actualizada el 2026-11-04 (Ecuador) desde la nube.
 **IA y aparato:** Claude Code. Revisión en la PC; arreglos en la nube.
-**Rama:** `main` (versión 0.3.0).
+**Rama:** `main` (versión 0.4.0).
 
 ## Hecho en la nube (2026-11-03 y 2026-11-04)
 
@@ -22,6 +22,7 @@
 - 0.2.13: al editar el texto de una nota, texto o sello, la hoja se actualiza mientras se escribe (en cada pausa de 350 ms), no solo al tocar fuera. Lo escrito de un tirón es un solo paso de deshacer (`junto` en `editar_anotacion`). Pruebas del motor: 18.
 - 0.2.14: con la escritura en vivo, una N sola se volvía Ñ (el teclado cerraba la palabra a medias y la corregía). El panel espera a que el teclado termine la palabra (`compositionend`) y el cuadro va con `autoCorrect="off"`. Por comprobar en el celular.
 - 0.3.0 (Fase 3, primera parte): «Organizar páginas» desde el panel ☰: mover (arrastrar o ◀ ▶), girar, quitar, duplicar, extraer, deshacer y guardar copia (se abre la copia organizada). El motor reordena una copia del PDF abierto con sus anotaciones. Pruebas: 21 del motor y 17 de la pantalla.
+- 0.4.0 (Fase 4, primera parte): se abren para leer Word/Excel/PowerPoint, EPUB, MOBI, FB2, TXT, HTML, XPS, CBZ e imágenes (MuPDF con `html, epub, xps, cbz, img`). Anotar y organizar solo en PDF. "Abrir con" en Android y Windows para esos formatos (no para fotos). Pruebas: 23 del motor.
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo
@@ -66,7 +67,8 @@ Búsqueda, últimos archivos, compartir, selector de Android con permiso guardab
 
 1. David prueba la 0.2.12 en el celular: Nota amarilla, formulario (F/M y casillas), mover un sello, buscar en un PDF grande, guardar copia, tocar el índice impreso y las dos manijas de selección.
 2. ✅ Separados `App.tsx` y `motor.rs` (hallazgo 13), junto con la 0.2.14.
-3. Fase 3: organizar un PDF ✅ (0.3.0). Falta unir varios PDFs (0.3.1).
+3. Fase 3: organizar un PDF ✅ (0.3.0). Unir varios PDFs (0.3.1) quedó pendiente porque David adelantó la Fase 4.
+4. Fase 4: abrir otros formatos para leer ✅ (0.4.0). Falta: editar TXT y edición sencilla de DOCX.
 
 ## Pendiente para el celular
 
