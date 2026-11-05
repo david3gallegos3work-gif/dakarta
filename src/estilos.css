@@ -259,3 +259,8 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .anot .girador svg { width: 16px; height: 16px; }
 .anot .girador::after { content: ''; position: absolute; top: 26px; left: 50%; width: 2px; height: 8px; margin-left: -1px; background: #f57c00; }
 .noche .anot .girador { background: #ffb74d; box-shadow: 0 0 0 1px #ffb74d; }
+.campo-clave { width: 100%; min-height: 44px; padding: 0 12px; border: 1px solid #9fb3c8; border-radius: 8px; background: #fff; color: #1a1a1a; font: inherit; font-size: 16px; }
+.clave-mal { color: #c62828; }
+.tarjeta-aviso .clave-nota { font-size: 13px; opacity: 0.8; }
+.noche .campo-clave { background: #2f2f2f; color: #eee; border-color: #555; }
+.noche .clave-mal { color: #ef9a9a; }
