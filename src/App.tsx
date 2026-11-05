@@ -17,15 +17,7 @@ import {
 import { Organizar } from './Organizar.tsx'
 import { Paginas } from './Paginas.tsx'
 import { Indice, Paleta, PanelAnotacion, Tamanos } from './Paneles.tsx'
-import {
-  guardarReciente,
-  leerRecientes,
-  marcarAbriendo,
-  olvidarReciente,
-  porTipo,
-  seCerroAbriendo,
-  type Reciente,
-} from './recientes.ts'
+import { guardarReciente, leerRecientes, marcarAbriendo, olvidarReciente, seCerroAbriendo, type Reciente } from './recientes.ts'
 import type {
   Ancla,
   Anotacion,
@@ -628,7 +620,7 @@ export default function App() {
   }
 
   const abrirReciente = (r: Reciente) => {
-    siPuedeCambiar(() => cargar(invoke<Info>('abrir_ruta', { ruta: r.ruta, nombre: r.nombre }), r))
+    siPuedeCambiar(() => cargar(invoke<Info>('abrir_ruta', { ruta: r.ruta }), r))
   }
 
   const entrarEditar = () => {
@@ -1005,7 +997,7 @@ export default function App() {
         } else {
           // El PDF abierto no cambió: se abre la copia organizada para seguir en ella.
           setVerOrganizar(false)
-          cargar(invoke<Info>('abrir_ruta', { ruta: guardada, nombre: nombreDestino }), { ruta: guardada, nombre: nombreDestino })
+          cargar(invoke<Info>('abrir_ruta', { ruta: guardada }), { ruta: guardada, nombre: nombreDestino })
         }
         return
       }
@@ -1134,14 +1126,7 @@ export default function App() {
     let llegoArchivo = false
     const abrirRuta = (ruta: string, reciente?: Reciente) => {
       llegoArchivo = true
-      // El nombre dice el tipo (Word, EPUB…): en Android la ruta no lo trae.
-      let nombre = reciente?.nombre
-      try {
-        nombre ??= window.DakartaAndroid?.nombre(ruta) ?? undefined
-      } catch {
-        // sin nombre: el motor mira los primeros bytes del archivo
-      }
-      cargar(invoke<Info>('abrir_ruta', { ruta, nombre }), reciente)
+      cargar(invoke<Info>('abrir_ruta', { ruta }), reciente)
     }
     const pendiente = () => {
       const ruta = window.DakartaAndroid?.pendiente()
@@ -1157,11 +1142,11 @@ export default function App() {
         // Si la vez anterior la app se cerró abriendo un PDF, no se reabre solo: se cerraría otra vez.
         if (seCerroAbriendo()) {
           marcarAbriendo(false)
-          setError(`La última vez Dakarta se cerró al abrir un documento. Si quieres, abre «${ultimo.nombre}» con «Abrir».`)
+          setError(`La última vez Dakarta se cerró al abrir un PDF. Si quieres, abre «${ultimo.nombre}» con «Abrir».`)
         } else abrirRuta(ultimo.ruta, ultimo)
       }
     })
-    // Si se sale de la app, el documento no la cerró: la marca de «abriendo» ya no hace falta.
+    // Si se sale de la app, el PDF no la cerró: la marca de «abriendo» ya no hace falta.
     const alSalir = () => {
       if (document.visibilityState === 'hidden') marcarAbriendo(false)
     }
@@ -1253,18 +1238,16 @@ export default function App() {
                 </svg>
               </button>
             )}
-            {doc.info.pdf && (
-              <button
-                onClick={() => (editando ? salirEditar() : entrarEditar())}
-                aria-pressed={editando}
-                aria-label="Editar PDF"
-                title="Editar PDF"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M4 20h4L19 9l-4-4L4 16v4z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-                </svg>
-              </button>
-            )}
+            <button
+              onClick={() => (editando ? salirEditar() : entrarEditar())}
+              aria-pressed={editando}
+              aria-label="Editar PDF"
+              title="Editar PDF"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 20h4L19 9l-4-4L4 16v4z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+              </svg>
+            </button>
             <span className="pag">
               <input
                 key={actual}
@@ -1499,20 +1482,15 @@ export default function App() {
             {recientes.length > 0 && (
               <div className="recientes-panel">
                 <h2>Últimos archivos</h2>
-                {porTipo(recientes).map((g) => (
-                  <section key={g.titulo} className="recientes-tipo">
-                    <h3>{g.titulo}</h3>
-                    <ul>
-                      {g.recientes.map((r) => (
-                        <li key={r.ruta}>
-                          <button onClick={() => abrirReciente(r)} disabled={abriendo} title={r.nombre}>
-                            {r.nombre}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                ))}
+                <ul>
+                  {recientes.slice(0, 4).map((r) => (
+                    <li key={r.ruta}>
+                      <button onClick={() => abrirReciente(r)} disabled={abriendo} title={r.nombre}>
+                        {r.nombre}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
             {doc.info.indice.length ? (
@@ -1524,23 +1502,17 @@ export default function App() {
                 }}
               />
             ) : (
-              <p>
-                {doc.info.pdf
-                  ? 'Este PDF no trae índice lateral. Si tiene una página de índice al inicio, toca sus líneas: si traen enlace, te llevan a esa página.'
-                  : 'Este documento no trae índice lateral.'}
-              </p>
+              <p>Este PDF no trae índice lateral. Si tiene una página de índice al inicio, toca sus líneas: si traen enlace, te llevan a esa página.</p>
             )}
-            {doc.info.pdf && (
-              <button
-                className="version-indice"
-                onClick={() => {
-                  setVerIndice(false)
-                  setVerOrganizar(true)
-                }}
-              >
-                Organizar páginas
-              </button>
-            )}
+            <button
+              className="version-indice"
+              onClick={() => {
+                setVerIndice(false)
+                setVerOrganizar(true)
+              }}
+            >
+              Organizar páginas
+            </button>
             <button className="version-indice" onClick={() => setVerAcerca(true)}>
               Dakarta · versión y descargas
             </button>
@@ -1721,26 +1693,21 @@ export default function App() {
           <div className="bienvenida">
             <img src={logo} alt="Dakarta PDF" />
             <button className="grande" onClick={abrir} disabled={abriendo}>
-              {abriendo ? 'Abriendo…' : 'Abrir un documento'}
+              {abriendo ? 'Abriendo…' : 'Abrir un PDF'}
             </button>
             {error && <p className="error">{error}</p>}
             {recientes.length > 0 && (
               <div className="recientes">
                 <h2>Últimos archivos</h2>
-                {porTipo(recientes).map((g) => (
-                  <section key={g.titulo} className="recientes-tipo">
-                    <h3>{g.titulo}</h3>
-                    <ul>
-                      {g.recientes.map((r) => (
-                        <li key={r.ruta}>
-                          <button onClick={() => abrirReciente(r)} disabled={abriendo} title={r.nombre}>
-                            {r.nombre}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                ))}
+                <ul>
+                  {recientes.map((r) => (
+                    <li key={r.ruta}>
+                      <button onClick={() => abrirReciente(r)} disabled={abriendo} title={r.nombre}>
+                        {r.nombre}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
             <details className="panel-acerca">
