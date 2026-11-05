@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { agregarReciente, marcarAbriendo, MAX_RECIENTES, olvidarReciente, seCerroAbriendo } from './recientes.ts'
+import { agregarReciente, marcarAbriendo, MAX_RECIENTES, nombreLegible, olvidarReciente, porTipo, seCerroAbriendo } from './recientes.ts'
 
 test('el último archivo queda primero y no se repite', () => {
   const a = { ruta: '/a.pdf', nombre: 'a.pdf' }
@@ -37,4 +37,26 @@ test('si la app se cerró abriendo un PDF, al arrancar no se reabre solo', () =>
   assert.equal(seCerroAbriendo(), true)
   marcarAbriendo(false)
   assert.equal(seCerroAbriendo(), false)
+})
+
+test('los nombres sacados del enlace se ven limpios', () => {
+  assert.equal(nombreLegible('primary%3ADownload%2FFormulario-de-prueba.pdf'), 'Formulario-de-prueba.pdf')
+  assert.equal(nombreLegible('document%3A9741 (anotado).pdf'), '9741 (anotado).pdf')
+  assert.equal(nombreLegible('Tesis 100% final.pdf'), 'Tesis 100% final.pdf')
+  assert.equal(nombreLegible('Informe.docx'), 'Informe.docx')
+  assert.equal(nombreLegible('Reunión: acta.pdf'), 'Reunión: acta.pdf')
+})
+
+test('los últimos 3 de cada tipo, separados y en orden', () => {
+  const r = (n: string) => ({ ruta: n, nombre: n })
+  const lista = ['a.pdf', 'b.docx', 'c.pdf', 'd.pdf', 'e.pdf', 'f.epub', 'g.DOCX', 'h.zip'].map(r)
+  assert.deepEqual(
+    porTipo(lista).map((g) => [g.titulo, g.recientes.map((x) => x.nombre)]),
+    [
+      ['PDF', ['a.pdf', 'c.pdf', 'd.pdf']],
+      ['Word', ['b.docx', 'g.DOCX']],
+      ['Libros', ['f.epub']],
+      ['Otros', ['h.zip']],
+    ],
+  )
 })
