@@ -16,10 +16,11 @@ import {
   TAMANOS_SELLO,
   TAMANOS_TEXTO,
 } from './opciones.ts'
-import { jpegDe, miniaturaDe, nombreDeFotos } from './fotos.ts'
+import { jpegDe, miniaturaDe, nombreDeFotos, type Diseno, type Recorte as RecorteFoto } from './fotos.ts'
 import { Organizar, type Modo } from './Organizar.tsx'
 import { ABIERTO, type Fuente } from './organizar.ts'
 import { Paginas } from './Paginas.tsx'
+import { Recortar } from './Recortar.tsx'
 import { Indice, Paleta, PanelAnotacion, Tamanos } from './Paneles.tsx'
 import {
   guardarReciente,
@@ -137,7 +138,8 @@ export default function App() {
   // Pantalla de organizar páginas (un PDF) o de unir PDFs, con los PDFs cuyas hojas muestra al abrirse.
   const [organizar, setOrganizar] = useState<{ modo: Modo; fuentes: Fuente[] } | null>(null)
   // Crear PDF desde fotos: cada foto elegida (por su número) y su miniatura.
-  const fotos = useRef(new Map<number, { archivo: File; miniatura: string }>())
+  const fotos = useRef(new Map<number, { archivo: File; miniatura: string; recorte?: RecorteFoto }>())
+  const [recortando, setRecortando] = useState<number | null>(null)
   const siguienteFoto = useRef(0)
   const [miniaturas, setMiniaturas] = useState<Record<number, string>>({})
   // Android: el selector devuelve el PDF elegido para unir por el mismo camino que «Abrir con».
@@ -1036,6 +1038,7 @@ export default function App() {
     for (const f of fotos.current.values()) URL.revokeObjectURL(f.miniatura)
     fotos.current.clear()
     setMiniaturas({})
+    setRecortando(null)
     // Los PDFs agregados para unir ya no hacen falta: el motor los suelta.
     invoke('cerrar_agregados').catch(() => {})
   }, [])
@@ -1118,8 +1121,24 @@ export default function App() {
     return nuevas
   }
 
-  /** Arma el PDF con las fotos en ese orden y giro, lo guarda donde se elija y lo abre. */
-  const guardarFotos = async (hojas: Hoja[], a4: boolean) => {
+  /** Guarda el recorte de una foto y rehace su miniatura. */
+  const recortarFoto = async (id: number, recorte: RecorteFoto) => {
+    setRecortando(null)
+    const foto = fotos.current.get(id)
+    if (!foto) return
+    try {
+      const miniatura = await miniaturaDe(foto.archivo, recorte)
+      URL.revokeObjectURL(foto.miniatura)
+      fotos.current.set(id, { ...foto, miniatura, recorte })
+      setMiniaturas((m) => ({ ...m, [id]: miniatura }))
+    } catch (e) {
+      console.error(e)
+      setError('No se pudo recortar la foto.')
+    }
+  }
+
+  /** Arma el PDF con las fotos en ese orden, giro y recorte, lo guarda donde se elija y lo abre. */
+  const guardarFotos = async (hojas: Hoja[], diseno: Diseno) => {
     if (guardando || !hojas.length) return
     const nombre = nombreDeFotos()
     setGuardando(true)
@@ -1136,18 +1155,18 @@ export default function App() {
         const foto = fotos.current.get(h.archivo)
         if (!foto) throw new Error('Falta una foto')
         setExito(`Preparando foto ${i + 1} de ${hojas.length}…`)
-        await invoke('fotos_agregar', await jpegDe(foto.archivo, h.giro))
+        await invoke('fotos_agregar', await jpegDe(foto.archivo, h.giro, foto.recorte))
       }
       setExito('')
       let destino: string | null
       if (puente?.copiar && elegido) {
-        const cache = await invoke<string>('fotos_en_cache', { a4 })
+        const cache = await invoke<string>('fotos_en_cache', { diseno })
         if (!puente.copiar(elegido, cache)) throw new Error('No se pudo guardar el PDF.')
         puente.persistir(elegido)
         destino = elegido
         elegido = null
       } else {
-        destino = await invoke<string | null>('fotos_guardar_copia', { nombre, a4 })
+        destino = await invoke<string | null>('fotos_guardar_copia', { nombre, diseno })
         if (!destino) return
       }
       const guardado = destino
@@ -1276,6 +1295,10 @@ export default function App() {
         setPregunta(null)
         return true
       }
+      if (recortando !== null) {
+        setRecortando(null)
+        return true
+      }
       if (pideClave) {
         setPideClave(null)
         pideClave.alCancelar?.()
@@ -1314,7 +1337,7 @@ export default function App() {
     return () => {
       delete window.DakartaAtras
     }
-  }, [verIndice, verBuscar, cerrarBuscar, sucio, pregunta, pideClave, verAcerca, organizar, cerrarOrganizar])
+  }, [verIndice, verBuscar, cerrarBuscar, sucio, pregunta, pideClave, recortando, verAcerca, organizar, cerrarOrganizar])
 
   // Windows: avisar antes de cerrar la ventana si hay cambios sin guardar.
   useEffect(() => {
@@ -2044,17 +2067,26 @@ export default function App() {
           modo={organizar.modo}
           onAgregar={agregarPdf}
           onFotos={prepararFotos}
+          onRecortar={setRecortando}
           miniaturas={miniaturas}
           guardando={guardando}
-          onGuardar={(hojas, extraer, a4) =>
+          onGuardar={(hojas, extraer, diseno) =>
             void (organizar.modo === 'fotos'
-              ? guardarFotos(hojas, a4)
+              ? guardarFotos(hojas, diseno)
               : guardarCopia({ hojas, extraer, unir: organizar.modo === 'unir' }))
           }
           onCerrar={cerrarOrganizar}
           aviso={exito}
           error={error}
           onAviso={setError}
+        />
+      )}
+      {recortando !== null && fotos.current.get(recortando) && (
+        <Recortar
+          archivo={fotos.current.get(recortando)!.archivo}
+          inicial={fotos.current.get(recortando)!.recorte}
+          onListo={(r) => void recortarFoto(recortando, r)}
+          onCancelar={() => setRecortando(null)}
         />
       )}
 
