@@ -1,5 +1,6 @@
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Diseno } from './fotos.ts'
 import { ABIERTO, fichasDe, moverMarcadas, ordenarPorArchivo, type Ficha, type Fuente } from './organizar.ts'
 import type { Hoja } from './tipos.ts'
 import { MINIATURA } from './zoom.ts'
@@ -37,6 +38,7 @@ export function Organizar({
   modo,
   onAgregar,
   onFotos,
+  onRecortar,
   miniaturas,
   guardando,
   onGuardar,
@@ -51,11 +53,13 @@ export function Organizar({
   onAgregar: () => Promise<Fuente[]>
   /** Fotos: prepara las elegidas (o la tomada con la cámara) y devuelve una fuente por foto. */
   onFotos?: (archivos: File[]) => Promise<Fuente[]>
+  /** Fotos: recortar la foto de ese número de archivo. */
+  onRecortar?: (archivo: number) => void
   /** Fotos: la miniatura de cada una, por su número de archivo. */
   miniaturas?: Record<number, string>
   guardando: boolean
-  /** `a4`: solo con fotos; hojas A4 con la foto centrada (si no, cada hoja con la forma de su foto). */
-  onGuardar: (hojas: Hoja[], extraer: boolean, a4: boolean) => void
+  /** `diseno`: solo con fotos; cómo van las fotos en las hojas. */
+  onGuardar: (hojas: Hoja[], extraer: boolean, diseno: Diseno) => void
   onCerrar: () => void
   /** Avisos de la app (copia guardada, errores): esta pantalla tapa los de siempre, así que los muestra ella. */
   aviso: string
@@ -64,7 +68,7 @@ export function Organizar({
 }) {
   const unir = modo === 'unir'
   const fotos = modo === 'fotos'
-  const [a4, setA4] = useState(true)
+  const [diseno, setDiseno] = useState<Diseno>('a4')
   const [fuentes, setFuentes] = useState(fuentesIniciales)
   const siguienteId = useRef(0)
   const [lista, setLista] = useState(() =>
@@ -231,7 +235,9 @@ export function Organizar({
       ) : (
         <p className={aviso ? 'organizar-ayuda organizar-ok' : 'organizar-ayuda'} role="status">
           {aviso ||
-            (fotos && !lista.length
+            (fotos && diseno === 'documentos' && !marcadas.size
+              ? 'Van dos por fila a tamaño real: cédula (frente y reverso), luego papeleta (frente y reverso). Marca cada foto y toca «Recortar» para dejar solo el documento.'
+              : fotos && !lista.length
               ? `Toca «+ Fotos» para elegirlas${android ? ' o «Cámara» para tomar una' : ''}. Cada foto será una hoja.`
               : unir && !lista.length
               ? 'Toca «Agregar PDF» para elegir los PDFs que quieres unir.'
@@ -330,11 +336,21 @@ export function Organizar({
             <button onClick={() => mover(1)} aria-label="Mover después" title="Mover después">
               ▶
             </button>
+            {fotos && onRecortar && marcadasEnOrden.length === 1 && (
+              <button
+                onClick={() => {
+                  onRecortar(marcadasEnOrden[0].archivo)
+                  setMarcadas(new Set())
+                }}
+              >
+                Recortar
+              </button>
+            )}
             <button onClick={girar}>Girar</button>
             <button onClick={duplicar}>Duplicar</button>
             <button onClick={quitar}>Quitar</button>
             {!fotos && (
-              <button onClick={() => onGuardar(hojas(marcadasEnOrden), true, a4)} disabled={guardando}>
+              <button onClick={() => onGuardar(hojas(marcadasEnOrden), true, diseno)} disabled={guardando}>
                 Extraer
               </button>
             )}
@@ -344,10 +360,11 @@ export function Organizar({
           <>
             {elegirFotos(false)}
             {android && elegirFotos(true)}
-            <label className="organizar-opcion">
-              <input type="checkbox" checked={a4} onChange={(e) => setA4(e.target.checked)} />
-              Hoja A4
-            </label>
+            <select className="organizar-opcion" value={diseno} onChange={(e) => setDiseno(e.target.value as Diseno)} aria-label="Diseño">
+              <option value="a4">Una por hoja A4</option>
+              <option value="foto">Una por hoja, tamaño de la foto</option>
+              <option value="documentos">Cédula y papeleta (tamaño real)</option>
+            </select>
           </>
         ) : unir ? (
           <>
@@ -361,7 +378,7 @@ export function Organizar({
         ) : (
           <span className="organizar-cuenta">Marca hojas para moverlas, girarlas, quitarlas o extraerlas.</span>
         )}
-        <button className="grande" onClick={() => onGuardar(hojas(lista), false, a4)} disabled={guardando || !lista.length}>
+        <button className="grande" onClick={() => onGuardar(hojas(lista), false, diseno)} disabled={guardando || !lista.length}>
           {guardando ? 'Guardando…' : unir ? 'Unir' : fotos ? 'Crear PDF' : 'Guardar copia'}
         </button>
       </div>

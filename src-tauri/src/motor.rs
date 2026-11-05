@@ -31,7 +31,7 @@ use busqueda::*;
 use capas::*;
 use formulario::*;
 use organizar::{organizar_y_guardar, unir_y_guardar, ABIERTO};
-pub use fotos::pdf_de_fotos;
+pub use fotos::{pdf_de_fotos, Diseno};
 pub use organizar::Hoja;
 use pintar::*;
 

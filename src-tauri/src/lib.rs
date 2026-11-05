@@ -3,7 +3,7 @@ mod motor;
 
 use std::sync::Mutex;
 
-use motor::{pdf_de_fotos, Anotacion, Busqueda, Campo, Enlace, Hoja, Info, Motor, Palabra};
+use motor::{pdf_de_fotos, Anotacion, Diseno, Busqueda, Campo, Enlace, Hoja, Info, Motor, Palabra};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_opener::OpenerExt;
@@ -336,28 +336,28 @@ fn fotos_agregar(pedido: tauri::ipc::Request<'_>, fotos: State<'_, Fotos>) -> Re
     Ok(())
 }
 
-fn armar_fotos(fotos: &Fotos, a4: bool, destino: &str) -> Result<(), String> {
+fn armar_fotos(fotos: &Fotos, diseno: Diseno, destino: &str) -> Result<(), String> {
     let lista = std::mem::take(&mut *fotos.0.lock().expect("fotos"));
-    pdf_de_fotos(&lista, a4, destino)
+    pdf_de_fotos(&lista, diseno, destino)
 }
 
 /// Android: arma el PDF de fotos en la caché; la app lo copia al destino elegido por el usuario.
 #[tauri::command]
-async fn fotos_en_cache(app: AppHandle, fotos: State<'_, Fotos>, a4: bool) -> Result<String, String> {
+async fn fotos_en_cache(app: AppHandle, fotos: State<'_, Fotos>, diseno: Diseno) -> Result<String, String> {
     let ruta = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("fotos.pdf");
     let ruta = ruta.to_string_lossy().into_owned();
-    armar_fotos(&fotos, a4, &ruta)?;
+    armar_fotos(&fotos, diseno, &ruta)?;
     Ok(ruta)
 }
 
 /// Windows: pregunta dónde guardar el PDF de fotos y lo arma ahí.
 #[tauri::command]
-async fn fotos_guardar_copia(app: AppHandle, fotos: State<'_, Fotos>, nombre: String, a4: bool) -> Result<Option<String>, String> {
+async fn fotos_guardar_copia(app: AppHandle, fotos: State<'_, Fotos>, nombre: String, diseno: Diseno) -> Result<Option<String>, String> {
     let Some(ruta) = app.dialog().file().set_file_name(nombre).add_filter("PDF", &["pdf"]).blocking_save_file() else {
         return Ok(None);
     };
     let destino = ruta.into_path().map_err(|e| e.to_string())?.to_string_lossy().into_owned();
-    armar_fotos(&fotos, a4, &destino)?;
+    armar_fotos(&fotos, diseno, &destino)?;
     Ok(Some(destino))
 }
 

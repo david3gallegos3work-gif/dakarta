@@ -268,3 +268,19 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .organizar-acciones .boton-archivo.desactivado { opacity: 0.5; pointer-events: none; }
 .organizar-opcion { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
 .noche .organizar-acciones .boton-archivo { background: #2f2f2f; border-color: #555; }
+.recortar { position: fixed; inset: 0; z-index: 18; display: flex; flex-direction: column; background: #111; color: #eee; }
+.recortar-zona { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.recortar-foto { position: relative; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+.recortar-foto img { display: block; width: 100%; height: 100%; pointer-events: none; }
+.recortar-cuadro { position: absolute; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55); outline: 2px solid #fff; cursor: move; touch-action: none; }
+.recortar-esquina { position: absolute; width: 40px; height: 40px; max-width: 50%; max-height: 50%; touch-action: none; }
+.recortar-esquina::after { content: ''; position: absolute; width: 22px; height: 22px; border: 0 solid #fff; filter: drop-shadow(0 0 2px #000); }
+.recortar-esquina.ai { left: 0; top: 0; cursor: nwse-resize; }
+.recortar-esquina.ai::after { left: 0; top: 0; border-left-width: 5px; border-top-width: 5px; }
+.recortar-esquina.ad { right: 0; top: 0; cursor: nesw-resize; }
+.recortar-esquina.ad::after { right: 0; top: 0; border-right-width: 5px; border-top-width: 5px; }
+.recortar-esquina.bi { left: 0; bottom: 0; cursor: nesw-resize; }
+.recortar-esquina.bi::after { left: 0; bottom: 0; border-left-width: 5px; border-bottom-width: 5px; }
+.recortar-esquina.bd { right: 0; bottom: 0; cursor: nwse-resize; }
+.recortar-esquina.bd::after { right: 0; bottom: 0; border-right-width: 5px; border-bottom-width: 5px; }
+.recortar .organizar-acciones { color: #1a1a1a; }
