@@ -29,7 +29,7 @@ use anotar::*;
 use busqueda::*;
 use capas::*;
 use formulario::*;
-use organizar::organizar_y_guardar;
+use organizar::{organizar_y_guardar, unir_y_guardar, ABIERTO};
 pub use organizar::Hoja;
 use pintar::*;
 
@@ -193,6 +193,8 @@ struct Recorte {
 
 struct PedidoPagina {
     n: i32,
+    /// Una hoja de uno de los PDFs agregados para unir (su número); sin él, del PDF abierto.
+    archivo: Option<usize>,
     ancho: u32,
     recorte: Option<Recorte>,
     resp: UriSchemeResponder,
@@ -298,6 +300,9 @@ enum Pedido {
     Campo { n: i32, xref: i32, valor: String, resp: Sender<Result<(), String>> },
     /// Con `hojas`, guarda un PDF nuevo con esas hojas en ese orden (organizar o extraer páginas).
     Guardar { destino: String, hojas: Option<Vec<Hoja>>, resp: Sender<Result<(), String>> },
+    /// Abre otro PDF para unirlo; devuelve su número y cuántas páginas tiene.
+    AbrirAgregado { ruta: String, archivo: Option<File>, resp: Sender<Result<(usize, i32), String>> },
+    CerrarAgregados,
 }
 
 /// MuPDF no se comparte entre hilos: un solo hilo guarda el documento y atiende los pedidos.
@@ -309,6 +314,8 @@ impl Motor {
         std::thread::spawn(move || {
             // En Android el archivo viaja con el documento: si se cerrara, MuPDF perdería el acceso.
             let mut abierto: Option<(PdfDocument, Option<File>)> = None;
+            // PDFs agregados para unir: se leen mientras está abierta la pantalla de unir.
+            let mut agregados: Vec<(PdfDocument, Option<File>, String)> = Vec::new();
             let mut ruta_abierta = String::new();
             // Anotaciones y campos cambiados en esta sesión, para deshacer.
             let mut hechas: Vec<Hecho> = Vec::new();
@@ -522,6 +529,27 @@ impl Motor {
                             };
                             let _ = resp.send(r);
                         }
+                        Pedido::AbrirAgregado { ruta, archivo, resp } => {
+                            let r = abrir_doc(&ruta).map(|(doc, info)| {
+                                agregados.push((doc, archivo, ruta));
+                                (agregados.len() - 1, info.paginas)
+                            });
+                            let _ = resp.send(r);
+                        }
+                        Pedido::CerrarAgregados => agregados.clear(),
+                        Pedido::Guardar { destino, hojas, resp }
+                            if hojas.as_ref().is_some_and(|h| h.iter().any(|x| x.archivo != ABIERTO)) =>
+                        {
+                            let docs: Vec<&PdfDocument> = agregados.iter().map(|(d, _, _)| d).collect();
+                            let pisa = agregados.iter().any(|(_, _, r)| mismo_archivo(r, &destino))
+                                || abierto.is_some() && mismo_archivo(&ruta_abierta, &destino);
+                            let r = if pisa {
+                                Err("No se puede guardar encima de uno de los PDFs que se unen. Elige otro nombre.".into())
+                            } else {
+                                unir_y_guardar(abierto.as_ref().map(|(d, _)| d), &docs, hojas.as_deref().unwrap_or_default(), &destino)
+                            };
+                            let _ = resp.send(r);
+                        }
                         Pedido::Guardar { destino, hojas, resp } => {
                             let r = match &abierto {
                                 None => Err("No hay un documento abierto".into()),
@@ -580,6 +608,15 @@ impl Motor {
                     }
                 }
                 let clave = (p.n, p.ancho);
+                if let Some(a) = p.archivo {
+                    // Miniatura de un PDF agregado para unir: no se guarda en la memoria de páginas.
+                    let r = match agregados.get(a) {
+                        Some((doc, _, _)) => pintar(doc, p.n, p.ancho),
+                        None => Err("Ese PDF ya no está".into()),
+                    };
+                    p.resp.respond(respuesta(r));
+                    continue;
+                }
                 let r = match (&abierto, p.recorte) {
                     (None, _) => Err("No hay un documento abierto".into()),
                     (Some((doc, _)), Some(recorte)) => pintar_recorte(doc, p.n, recorte),
@@ -744,6 +781,16 @@ impl Motor {
         rx.recv().map_err(texto)?
     }
 
+    pub fn abrir_agregado(&self, ruta: String, archivo: Option<File>) -> Result<(usize, i32), String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::AbrirAgregado { ruta, archivo, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
+    pub fn cerrar_agregados(&self) {
+        let _ = self.0.send(Pedido::CerrarAgregados);
+    }
+
     pub fn guardar(&self, destino: String, hojas: Option<Vec<Hoja>>) -> Result<(), String> {
         let (tx, rx) = mpsc::channel();
         self.0.send(Pedido::Guardar { destino, hojas, resp: tx }).map_err(texto)?;
@@ -762,9 +809,10 @@ impl Motor {
             let recorte = (|| Some(Recorte { w, h: q("h")?, x: q("x")?, y: q("y")?, cw: q("cw")?, ch: q("ch")? }))();
             Some((n, w, recorte))
         };
+        let archivo = q("a").map(|a| a as usize);
         match leido() {
             Some((n, ancho, recorte)) => {
-                let _ = self.0.send(Pedido::Pagina(PedidoPagina { n, ancho, recorte, resp }));
+                let _ = self.0.send(Pedido::Pagina(PedidoPagina { n, archivo, ancho, recorte, resp }));
             }
             None => resp.respond(respuesta(Err("Pedido no válido".into()))),
         }

@@ -1,7 +1,7 @@
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { moverMarcadas, type Ficha } from './organizar.ts'
-import type { Doc, Hoja } from './tipos.ts'
+import { ABIERTO, fichasDe, moverMarcadas, ordenarPorArchivo, type Ficha, type Fuente } from './organizar.ts'
+import type { Hoja } from './tipos.ts'
 import { MINIATURA } from './zoom.ts'
 
 /** Mantener presionada una ficha este tiempo la levanta para arrastrarla. */
@@ -19,12 +19,18 @@ function giroQueEntra(giro: number, proporcion = 4 / 3) {
 
 type Arrastre = { id: number; x: number; y: number; destino: number | null }
 
+/** Al unir, cada PDF lleva su color en el borde de sus hojas. */
+const COLORES_ARCHIVO = ['#1565c0', '#e65100', '#2e7d32', '#6a1b9a', '#c62828', '#00838f', '#ad1457', '#5d4037']
+
 /**
  * Pantalla con todas las hojas en miniatura: mover, girar, quitar, duplicar o extraer, con deshacer.
- * Nada se cambia en el PDF hasta guardar; ahí el motor arma un PDF nuevo con este orden.
+ * Con `unir`, además se agregan otros PDFs y sus hojas se intercalan. Nada se cambia en ningún PDF hasta
+ * guardar; ahí el motor arma un PDF nuevo con este orden.
  */
 export function Organizar({
-  doc,
+  fuentes: fuentesIniciales,
+  unir,
+  onAgregar,
   guardando,
   onGuardar,
   onCerrar,
@@ -32,7 +38,10 @@ export function Organizar({
   error,
   onAviso,
 }: {
-  doc: Doc
+  fuentes: Fuente[]
+  unir: boolean
+  /** Pide uno o más PDFs para unir y devuelve los que se agregaron (vacío si se canceló). */
+  onAgregar: () => Promise<Fuente[]>
   guardando: boolean
   onGuardar: (hojas: Hoja[], extraer: boolean) => void
   onCerrar: () => void
@@ -41,17 +50,21 @@ export function Organizar({
   error: string
   onAviso: (texto: string) => void
 }) {
-  const inicial = useMemo(
-    () => Array.from({ length: doc.info.paginas }, (_, i): Ficha => ({ id: i, pagina: i, giro: 0 })),
-    [doc],
+  const [fuentes, setFuentes] = useState(fuentesIniciales)
+  const siguienteId = useRef(0)
+  const [lista, setLista] = useState(() =>
+    fuentesIniciales.flatMap((f) => {
+      const fichas = fichasDe(f, siguienteId.current)
+      siguienteId.current += fichas.length
+      return fichas
+    }),
   )
-  const [lista, setLista] = useState(inicial)
   const [historial, setHistorial] = useState<Ficha[][]>([])
   const [marcadas, setMarcadas] = useState<Set<number>>(new Set())
   const [arrastre, setArrastre] = useState<Arrastre | null>(null)
-  // Alto entre ancho de cada página, para achicar bien las giradas.
-  const [proporciones, setProporciones] = useState<Record<number, number>>({})
-  const siguienteId = useRef(doc.info.paginas)
+  // Alto entre ancho de cada página («archivo:página»), para achicar bien las giradas.
+  const [proporciones, setProporciones] = useState<Record<string, number>>({})
+  const [agregando, setAgregando] = useState(false)
   const reloj = useRef<ReturnType<typeof setTimeout>>(undefined)
   const inicio = useRef<{ id: number; x: number; y: number } | null>(null)
   const arrastrando = useRef(false)
@@ -104,7 +117,25 @@ export function Organizar({
     cambiar(lista.filter((f) => !marcadas.has(f.id)))
     setMarcadas(new Set())
   }
-  const hojas = (fichas: Ficha[]): Hoja[] => fichas.map((f) => ({ pagina: f.pagina, giro: f.giro }))
+  const hojas = (fichas: Ficha[]): Hoja[] => fichas.map((f) => ({ pagina: f.pagina, giro: f.giro, archivo: f.archivo }))
+  const agregar = async () => {
+    setAgregando(true)
+    try {
+      const nuevas = await onAgregar()
+      if (!nuevas.length) return
+      const fichas = nuevas.flatMap((f) => {
+        const lista = fichasDe(f, siguienteId.current)
+        siguienteId.current += lista.length
+        return lista
+      })
+      setFuentes((x) => [...x, ...nuevas])
+      cambiar([...lista, ...fichas])
+    } finally {
+      setAgregando(false)
+    }
+  }
+  const color = (f: Ficha) => COLORES_ARCHIVO[Math.max(0, fuentes.findIndex((x) => x.archivo === f.archivo)) % COLORES_ARCHIVO.length]
+  const clave = (f: Ficha) => `${f.archivo}:${f.pagina}`
 
   // Mientras se arrastra una ficha, el dedo no debe desplazar la lista.
   useEffect(() => {
@@ -138,15 +169,17 @@ export function Organizar({
   }
 
   const fichaArrastrada = arrastre && lista.find((f) => f.id === arrastre.id)
-  const url = (f: Ficha) => `${convertFileSrc(String(f.pagina), 'pagina')}?w=${MINIATURA}&d=${doc.id}&o=${apertura}`
+  const url = (f: Ficha) =>
+    `${convertFileSrc(String(f.pagina), 'pagina')}?w=${MINIATURA}${f.archivo === ABIERTO ? '' : `&a=${f.archivo}`}&o=${apertura}`
+  const titulo = unir ? 'Unir PDFs' : 'Organizar páginas'
 
   return (
-    <div className="organizar" role="dialog" aria-modal="true" aria-label="Organizar páginas">
+    <div className="organizar" role="dialog" aria-modal="true" aria-label={titulo}>
       <header className="barra organizar-barra">
-        <button onClick={onCerrar} aria-label="Volver al PDF" title="Volver al PDF">
+        <button onClick={onCerrar} aria-label="Volver" title="Volver">
           ←
         </button>
-        <strong>Organizar páginas</strong>
+        <strong>{titulo}</strong>
         <span className="organizar-cuenta">{lista.length} hojas</span>
         <button className="derecha" onClick={deshacer} disabled={!historial.length} aria-label="Deshacer" title="Deshacer">
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -161,8 +194,21 @@ export function Organizar({
         </button>
       ) : (
         <p className={aviso ? 'organizar-ayuda organizar-ok' : 'organizar-ayuda'} role="status">
-          {aviso || 'Toca las hojas para marcarlas. Mantén presionada una y arrástrala para moverla.'}
+          {aviso ||
+            (unir && !lista.length
+              ? 'Toca «Agregar PDF» para elegir los PDFs que quieres unir.'
+              : 'Toca las hojas para marcarlas. Mantén presionada una y arrástrala para moverla.')}
         </p>
+      )}
+      {unir && fuentes.length > 0 && (
+        <ul className="organizar-archivos">
+          {fuentes.map((f, i) => (
+            <li key={f.archivo}>
+              <span className="organizar-color" style={{ background: COLORES_ARCHIVO[i % COLORES_ARCHIVO.length] }} />
+              {f.nombre}
+            </li>
+          ))}
+        </ul>
       )}
       <div className="organizar-rejilla" ref={rejilla}>
         {lista.map((f, i) => (
@@ -177,6 +223,7 @@ export function Organizar({
             ].join(' ')}
             aria-pressed={marcadas.has(f.id)}
             aria-label={`Hoja ${i + 1}, página ${f.pagina + 1} del original${f.giro ? `, girada ${f.giro}°` : ''}`}
+            style={unir ? { borderBottomColor: color(f) } : undefined}
             onClick={() => {
               if (!arrastrando.current) alternar(f.id)
             }}
@@ -213,16 +260,16 @@ export function Organizar({
                 alt=""
                 loading="lazy"
                 draggable={false}
-                style={{ transform: giroQueEntra(f.giro, proporciones[f.pagina]) }}
+                style={{ transform: giroQueEntra(f.giro, proporciones[clave(f)]), ...(unir ? { outline: `3px solid ${color(f)}` } : {}) }}
                 onLoad={(e) => {
                   const { naturalWidth: w, naturalHeight: h } = e.currentTarget
-                  if (w && h && !(f.pagina in proporciones)) setProporciones((p) => ({ ...p, [f.pagina]: h / w }))
+                  if (w && h && !(clave(f) in proporciones)) setProporciones((p) => ({ ...p, [clave(f)]: h / w }))
                 }}
               />
             </span>
             <span className="ficha-numero">
               {i + 1}
-              {f.pagina !== i && <small> (pág. {f.pagina + 1})</small>}
+              {(unir || f.pagina !== i) && <small> (pág. {f.pagina + 1})</small>}
             </span>
           </button>
         ))}
@@ -253,11 +300,20 @@ export function Organizar({
             </button>
             <button onClick={() => setMarcadas(new Set())}>Desmarcar</button>
           </>
+        ) : unir ? (
+          <>
+            <button onClick={() => void agregar()} disabled={agregando}>
+              {agregando ? 'Abriendo…' : '+ Agregar PDF'}
+            </button>
+            <button onClick={() => cambiar(ordenarPorArchivo(lista, fuentes))} disabled={fuentes.length < 2}>
+              Ordenar por archivo
+            </button>
+          </>
         ) : (
           <span className="organizar-cuenta">Marca hojas para moverlas, girarlas, quitarlas o extraerlas.</span>
         )}
-        <button className="grande" onClick={() => onGuardar(hojas(lista), false)} disabled={guardando}>
-          {guardando ? 'Guardando…' : 'Guardar copia'}
+        <button className="grande" onClick={() => onGuardar(hojas(lista), false)} disabled={guardando || !lista.length}>
+          {guardando ? 'Guardando…' : unir ? 'Unir' : 'Guardar copia'}
         </button>
       </div>
     </div>
