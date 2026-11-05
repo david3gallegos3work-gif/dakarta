@@ -618,7 +618,7 @@ export default function App() {
   }
 
   const abrirReciente = (r: Reciente) => {
-    siPuedeCambiar(() => cargar(invoke<Info>('abrir_ruta', { ruta: r.ruta }), r))
+    siPuedeCambiar(() => cargar(invoke<Info>('abrir_ruta', { ruta: r.ruta, nombre: r.nombre }), r))
   }
 
   const entrarEditar = () => {
@@ -995,7 +995,7 @@ export default function App() {
         } else {
           // El PDF abierto no cambió: se abre la copia organizada para seguir en ella.
           setVerOrganizar(false)
-          cargar(invoke<Info>('abrir_ruta', { ruta: guardada }), { ruta: guardada, nombre: nombreDestino })
+          cargar(invoke<Info>('abrir_ruta', { ruta: guardada, nombre: nombreDestino }), { ruta: guardada, nombre: nombreDestino })
         }
         return
       }
@@ -1124,7 +1124,14 @@ export default function App() {
     let llegoArchivo = false
     const abrirRuta = (ruta: string, reciente?: Reciente) => {
       llegoArchivo = true
-      cargar(invoke<Info>('abrir_ruta', { ruta }), reciente)
+      // El nombre dice el tipo (Word, EPUB…): en Android la ruta no lo trae.
+      let nombre = reciente?.nombre
+      try {
+        nombre ??= window.DakartaAndroid?.nombre(ruta) ?? undefined
+      } catch {
+        // sin nombre: el motor mira los primeros bytes del archivo
+      }
+      cargar(invoke<Info>('abrir_ruta', { ruta, nombre }), reciente)
     }
     const pendiente = () => {
       const ruta = window.DakartaAndroid?.pendiente()
@@ -1230,16 +1237,18 @@ export default function App() {
                 </svg>
               </button>
             )}
-            <button
-              onClick={() => (editando ? salirEditar() : entrarEditar())}
-              aria-pressed={editando}
-              aria-label="Editar PDF"
-              title="Editar PDF"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 20h4L19 9l-4-4L4 16v4z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-              </svg>
-            </button>
+            {doc.info.pdf && (
+              <button
+                onClick={() => (editando ? salirEditar() : entrarEditar())}
+                aria-pressed={editando}
+                aria-label="Editar PDF"
+                title="Editar PDF"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 20h4L19 9l-4-4L4 16v4z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+                </svg>
+              </button>
+            )}
             <span className="pag">
               <input
                 key={actual}
@@ -1494,17 +1503,23 @@ export default function App() {
                 }}
               />
             ) : (
-              <p>Este PDF no trae índice lateral. Si tiene una página de índice al inicio, toca sus líneas: si traen enlace, te llevan a esa página.</p>
+              <p>
+                {doc.info.pdf
+                  ? 'Este PDF no trae índice lateral. Si tiene una página de índice al inicio, toca sus líneas: si traen enlace, te llevan a esa página.'
+                  : 'Este documento no trae índice lateral.'}
+              </p>
             )}
-            <button
-              className="version-indice"
-              onClick={() => {
-                setVerIndice(false)
-                setVerOrganizar(true)
-              }}
-            >
-              Organizar páginas
-            </button>
+            {doc.info.pdf && (
+              <button
+                className="version-indice"
+                onClick={() => {
+                  setVerIndice(false)
+                  setVerOrganizar(true)
+                }}
+              >
+                Organizar páginas
+              </button>
+            )}
             <button className="version-indice" onClick={() => setVerAcerca(true)}>
               Dakarta · versión y descargas
             </button>
@@ -1684,7 +1699,7 @@ export default function App() {
           <div className="bienvenida">
             <img src={logo} alt="Dakarta PDF" />
             <button className="grande" onClick={abrir} disabled={abriendo}>
-              {abriendo ? 'Abriendo…' : 'Abrir un PDF'}
+              {abriendo ? 'Abriendo…' : 'Abrir un documento'}
             </button>
             {error && <p className="error">{error}</p>}
             {recientes.length > 0 && (

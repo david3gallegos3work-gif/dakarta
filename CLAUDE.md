@@ -16,6 +16,7 @@ Las reglas generales están en `~/.claude/CLAUDE.md`; aquí solo lo de este proy
 
 ## Cómo está armado
 - `src-tauri/src/motor.rs`: un solo hilo con MuPDF; pinta páginas a JPEG y las entrega por el protocolo `pagina://` (no base64 por IPC). Sus partes están en `motor/`: `anotar`, `formulario`, `busqueda`, `capas` (palabras y enlaces), `organizar` (mover, girar, quitar o duplicar hojas en una copia), `pintar` (y guardar) y `pruebas` (`cargo test`).
+- Otros formatos (desde la 0.4.0): el motor abre como PDF lo que empieza con `%PDF`; lo demás (Word, EPUB, TXT, imágenes…) con `Document::from_bytes`, solo para leer (`Abierto::Otro`). El tipo sale del nombre o de los primeros bytes (`tipo_de`). Los archivos de prueba están en `src-tauri/pruebas/`.
 - `src-tauri/src/lib.rs`: elegir y abrir el archivo (en Android el content:// se abre por su descriptor, sin copiarlo).
 - `src/App.tsx`: solo pide al motor las páginas cercanas a la pantalla; zoom con dos dedos, Ctrl+rueda o botones. Las hojas y sus capas están en `src/Paginas.tsx`; el panel de anotación, paletas e índice en `src/Paneles.tsx`; tipos en `src/tipos.ts`; colores y tamaños en `src/opciones.ts`; la pantalla de organizar páginas en `src/Organizar.tsx` (su lógica en `src/organizar.ts`).
 - Cada página tiene capas: miniatura (se queda), hoja entera (hasta 2048 px) y, con más zoom, un recorte de lo visible (`src/zoom.ts`).

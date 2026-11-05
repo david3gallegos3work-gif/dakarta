@@ -125,19 +125,19 @@ class PuenteDakarta(private val actividad: android.app.Activity) {
     }
   }
 
-  /** Menú de compartir de Android con el PDF que está abierto. */
+  /** Menú de compartir de Android con el documento que está abierto (PDF, Word, EPUB…). */
   @android.webkit.JavascriptInterface
   fun compartir(uri: String, nombre: String) {
     actividad.runOnUiThread {
       try {
         val u = android.net.Uri.parse(uri)
         val i = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-          type = "application/pdf"
+          type = actividad.contentResolver.getType(u) ?: "application/pdf"
           putExtra(android.content.Intent.EXTRA_STREAM, u)
           clipData = android.content.ClipData.newRawUri(nombre, u)
           addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        actividad.startActivity(android.content.Intent.createChooser(i, "Compartir PDF"))
+        actividad.startActivity(android.content.Intent.createChooser(i, "Compartir"))
       } catch (_: Exception) { }
     }
   }
@@ -202,7 +202,9 @@ class PuenteDakarta(private val actividad: android.app.Activity) {
     actividad.runOnUiThread {
       val i = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
         addCategory(android.content.Intent.CATEGORY_OPENABLE)
-        type = "application/pdf"
+        // PDF para todo; los demás formatos (Word, EPUB, TXT, imágenes…) para leer.
+        type = "*/*"
+        putExtra(android.content.Intent.EXTRA_MIME_TYPES, TIPOS_ABRIR + arrayOf("image/*"))
         addFlags(
           android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
             android.content.Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
@@ -214,6 +216,20 @@ class PuenteDakarta(private val actividad: android.app.Activity) {
 }
 
 private const val PEDIDO_PDF = 0x0DA1
+private val TIPOS_ABRIR = arrayOf(
+  "application/pdf",
+  "application/epub+zip",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/x-mobipocket-ebook",
+  "application/x-fictionbook+xml",
+  "application/vnd.ms-xpsdocument",
+  "application/oxps",
+  "application/vnd.comicbook+zip",
+  "application/x-cbz",
+  "text/plain"
+)
 private const val PEDIDO_GUARDAR = 0x0DA2
 '''
 fin = s.rstrip().rfind('}')
@@ -229,8 +245,19 @@ FILTRO = '''</intent-filter>
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="content" />
                 <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation" />
+                <data android:mimeType="application/x-mobipocket-ebook" />
+                <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="application/vnd.ms-xpsdocument" />
+                <data android:mimeType="application/oxps" />
+                <data android:mimeType="application/vnd.comicbook+zip" />
+                <data android:mimeType="application/x-cbz" />
+                <data android:mimeType="text/plain" />
             </intent-filter>'''
 if '</intent-filter>' not in m:
     sys.exit('Manifest: no se encontró intent-filter')
 open(man, 'w').write(m.replace('</intent-filter>', FILTRO, 1))
-print('Android listo: Abrir con Dakarta')
+print('Android listo: Abrir con Dakarta (PDF y otros formatos para leer)')

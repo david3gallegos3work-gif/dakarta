@@ -203,7 +203,7 @@ fn lo_escrito_de_un_tiron_se_deshace_en_un_solo_paso() {
     let ruta = ruta.to_string_lossy().into_owned();
     guardar_doc(&doc_de(300.0, 400.0), &ruta).unwrap();
     let motor = Motor::nuevo();
-    motor.abrir(ruta.clone(), None).unwrap();
+    motor.abrir(ruta.clone(), "prueba.pdf".into(), None).unwrap();
     motor.anotar_caja(0, 0.1, 0.1, "Nota".into(), (0.0, 0.0, 0.0), 12.0, true).unwrap();
     let xref = motor.anotaciones(0).unwrap()[0].xref;
     let negro = Some((0.0, 0.0, 0.0));
@@ -329,4 +329,43 @@ fn duplicar_una_hoja_con_formulario_no_duplica_las_casillas() {
     let acepto = campos_doc(&nuevo).unwrap().into_iter().find(|c| c.nombre == "acepto").unwrap();
     fijar_campo(&mut nuevo, 0, acepto.xref, &acepto.encendido).unwrap();
     std::fs::remove_file(&destino).unwrap();
+}
+
+fn prueba(nombre: &str) -> String {
+    format!("{}/pruebas/{nombre}", env!("CARGO_MANIFEST_DIR"))
+}
+
+#[test]
+fn reconoce_el_tipo_por_el_nombre_o_por_los_primeros_bytes() {
+    assert_eq!(tipo_de("Informe.DOCX", b""), Some("docx"));
+    assert_eq!(tipo_de("libro.epub", b""), Some("epub"));
+    // Android: la ruta no trae nombre; se mira el contenido.
+    let cab = |n: &str| leer_cabecera(&prueba(n)).unwrap();
+    assert_eq!(tipo_de("57", &cab("libro.epub")), Some("epub"));
+    assert_eq!(tipo_de("57", &cab("documento.docx")), Some("docx"));
+    assert_eq!(tipo_de("57", &cab("foto.jpg")), Some("jpg"));
+    assert_eq!(tipo_de("57", &cab("nota.txt")), Some("txt"));
+    assert_eq!(tipo_de("57", &[0u8, 1, 2, 3, 200, 7]), None);
+}
+
+#[test]
+fn abre_word_epub_txt_e_imagen_para_leer_buscar_y_copiar() {
+    let motor = Motor::nuevo();
+    for (archivo, palabra) in [("documento.docx", "Informe"), ("libro.epub", "Capítulo"), ("nota.txt", "Jamón"), ("foto.jpg", "")] {
+        // Se copian a un nombre sin extensión, como llegan en Android.
+        let sin_nombre = std::env::temp_dir().join(format!("dakarta-fmt-{}-{archivo}-57", std::process::id()));
+        std::fs::copy(prueba(archivo), &sin_nombre).unwrap();
+        for (ruta, nombre) in [(prueba(archivo), archivo.to_string()), (sin_nombre.to_string_lossy().into_owned(), "57".into())] {
+            let info = motor.abrir(ruta, nombre, None).unwrap_or_else(|e| panic!("{archivo}: {e}"));
+            assert!(!info.pdf, "{archivo}");
+            assert!(info.paginas >= 1, "{archivo}");
+            if !palabra.is_empty() {
+                let texto: String = motor.palabras(0).unwrap().into_iter().map(|p| p.texto).collect();
+                assert!(texto.contains(palabra), "{archivo}: {texto}");
+            }
+            assert!(motor.anotar_caja(0, 0.1, 0.1, "x".into(), (0.0, 0.0, 0.0), 12.0, false).unwrap_err().contains("solo se puede"));
+            assert!(motor.anotaciones(0).unwrap().is_empty());
+        }
+        std::fs::remove_file(&sin_nombre).unwrap();
+    }
 }
