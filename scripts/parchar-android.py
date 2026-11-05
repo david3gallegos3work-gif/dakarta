@@ -4,6 +4,7 @@
 # El botón "Abrir" usa el selector de Android (no el de Tauri): su permiso sí se puede guardar para reabrir el
 # archivo otro día. El selector de Tauri pide el archivo con ACTION_GET_CONTENT, que solo da permiso temporal.
 # "Atrás" (botón o gesto) cierra el panel o la búsqueda antes de salir de la app.
+# «Cámara» (crear PDF desde fotos) abre la cámara del sistema.
 import glob, sys
 
 act = glob.glob('src-tauri/gen/android/app/src/main/java/**/MainActivity.kt', recursive=True)[0]
@@ -232,5 +233,17 @@ FILTRO = '''</intent-filter>
             </intent-filter>'''
 if '</intent-filter>' not in m:
     sys.exit('Manifest: no se encontró intent-filter')
-open(man, 'w').write(m.replace('</intent-filter>', FILTRO, 1))
-print('Android listo: Abrir con Dakarta')
+m = m.replace('</intent-filter>', FILTRO, 1)
+# Crear PDF desde fotos: desde Android 11 la app debe declarar que usará la cámara del sistema; sin esto el
+# botón «Cámara» abre la galería en vez de la cámara.
+CAMARA = '''<queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+    </queries>
+    <application'''
+if '<application' not in m:
+    sys.exit('Manifest: no se encontró application')
+m = m.replace('<application', CAMARA, 1)
+open(man, 'w').write(m)
+print('Android listo: Abrir con Dakarta y cámara')

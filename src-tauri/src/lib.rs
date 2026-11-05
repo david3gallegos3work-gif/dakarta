@@ -3,7 +3,7 @@ mod motor;
 
 use std::sync::Mutex;
 
-use motor::{Anotacion, Busqueda, Campo, Enlace, Hoja, Info, Motor, Palabra};
+use motor::{pdf_de_fotos, Anotacion, Diseno, Busqueda, Campo, Enlace, Hoja, Info, Motor, Palabra};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_opener::OpenerExt;
@@ -317,6 +317,50 @@ async fn abrir_agregado(app: AppHandle, motor: State<'_, Motor>, ruta: String, c
     Ok(Agregado { archivo, paginas, nombre: p.nombre })
 }
 
+/// Crear PDF desde fotos: las fotos ya preparadas (JPEG) esperan aquí, en orden, hasta guardar.
+struct Fotos(Mutex<Vec<Vec<u8>>>);
+
+/// Empieza un PDF de fotos nuevo.
+#[tauri::command]
+fn fotos_vaciar(fotos: State<'_, Fotos>) {
+    fotos.0.lock().expect("fotos").clear();
+}
+
+/// Agrega la siguiente foto (llega como bytes, sin pasar a texto).
+#[tauri::command]
+fn fotos_agregar(pedido: tauri::ipc::Request<'_>, fotos: State<'_, Fotos>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(jpg) = pedido.body() else {
+        return Err("La foto no llegó bien.".into());
+    };
+    fotos.0.lock().expect("fotos").push(jpg.clone());
+    Ok(())
+}
+
+fn armar_fotos(fotos: &Fotos, diseno: Diseno, destino: &str) -> Result<(), String> {
+    let lista = std::mem::take(&mut *fotos.0.lock().expect("fotos"));
+    pdf_de_fotos(&lista, diseno, destino)
+}
+
+/// Android: arma el PDF de fotos en la caché; la app lo copia al destino elegido por el usuario.
+#[tauri::command]
+async fn fotos_en_cache(app: AppHandle, fotos: State<'_, Fotos>, diseno: Diseno) -> Result<String, String> {
+    let ruta = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("fotos.pdf");
+    let ruta = ruta.to_string_lossy().into_owned();
+    armar_fotos(&fotos, diseno, &ruta)?;
+    Ok(ruta)
+}
+
+/// Windows: pregunta dónde guardar el PDF de fotos y lo arma ahí.
+#[tauri::command]
+async fn fotos_guardar_copia(app: AppHandle, fotos: State<'_, Fotos>, nombre: String, diseno: Diseno) -> Result<Option<String>, String> {
+    let Some(ruta) = app.dialog().file().set_file_name(nombre).add_filter("PDF", &["pdf"]).blocking_save_file() else {
+        return Ok(None);
+    };
+    let destino = ruta.into_path().map_err(|e| e.to_string())?.to_string_lossy().into_owned();
+    armar_fotos(&fotos, diseno, &destino)?;
+    Ok(Some(destino))
+}
+
 #[tauri::command]
 fn cerrar_agregados(motor: State<'_, Motor>) {
     motor.cerrar_agregados();
@@ -329,6 +373,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .manage(Motor::nuevo())
+        .manage(Fotos(Mutex::new(Vec::new())))
         .manage(Inicial(Mutex::new(std::env::args().nth(1).filter(|a| !a.starts_with('-')))))
         .register_asynchronous_uri_scheme_protocol("pagina", |ctx, pedido, resp| {
             ctx.app_handle().state::<Motor>().pagina(pedido.uri(), resp)
@@ -336,6 +381,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
     elegir_pdf,
     elegir_pdfs,
+    fotos_vaciar,
+    fotos_agregar,
+    fotos_en_cache,
+    fotos_guardar_copia,
     archivo_inicial,
     abrir_ruta,
     descargar_version,
