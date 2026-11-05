@@ -500,3 +500,41 @@ fn un_pdf_con_contrasena_se_lee_entero_y_no_cambia_al_proteger_una_copia() {
     assert_eq!(textos(&abrir_doc(&ruta("q.pdf"), Some("xyz")).unwrap().0)[1], "leer 2");
     std::fs::remove_dir_all(&carpeta).unwrap();
 }
+
+#[test]
+fn crear_pdf_desde_fotos_pone_una_hoja_por_foto() {
+    // Dos «fotos»: una vertical (una hoja pintada) y una apaisada de 400×200.
+    let vertical = pintar(&pdf_con_texto("foto", 1), 0, 300).unwrap();
+    let mut px = Pixmap::new_with_w_h(&Colorspace::device_rgb(), 400, 200, false).unwrap();
+    px.clear_with(90).unwrap();
+    let apaisada = jpeg(&px, 85).unwrap();
+    let carpeta = std::env::temp_dir().join(format!("dakarta-fotos-{}", std::process::id()));
+    std::fs::create_dir_all(&carpeta).unwrap();
+    let ruta = |n: &str| carpeta.join(n).to_string_lossy().into_owned();
+    let medida = |doc: &PdfDocument, n: i32| {
+        let b = doc.load_page(n).unwrap().bounds().unwrap();
+        (b.width().round(), b.height().round())
+    };
+
+    pdf_de_fotos(&[vertical.clone(), apaisada.clone()], true, &ruta("a4.pdf")).unwrap();
+    let doc = abrir_pdf(&ruta("a4.pdf"), None).unwrap();
+    assert_eq!(doc.page_count().unwrap(), 2);
+    assert_eq!(medida(&doc, 0), (595.0, 842.0));
+    assert_eq!(medida(&doc, 1), (842.0, 595.0), "la apaisada va en A4 de lado");
+    // La foto se ve: la hoja pintada no queda en blanco.
+    assert!(pintar(&doc, 0, 200).unwrap().len() > pintar(&pdf_vacio(), 0, 200).unwrap().len());
+
+    pdf_de_fotos(&[apaisada], false, &ruta("forma.pdf")).unwrap();
+    let doc = abrir_pdf(&ruta("forma.pdf"), None).unwrap();
+    assert_eq!(medida(&doc, 0), (842.0, 421.0), "la hoja toma la forma de la foto");
+
+    assert!(pdf_de_fotos(&[], true, &ruta("nada.pdf")).is_err());
+    assert!(pdf_de_fotos(&[b"no es una foto".to_vec()], true, &ruta("mala.pdf")).is_err());
+    std::fs::remove_dir_all(&carpeta).unwrap();
+}
+
+fn pdf_vacio() -> PdfDocument {
+    let mut doc = PdfDocument::new();
+    doc.new_page((595.0, 842.0)).unwrap();
+    doc
+}

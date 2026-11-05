@@ -264,3 +264,7 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .tarjeta-aviso .clave-nota { font-size: 13px; opacity: 0.8; }
 .noche .campo-clave { background: #2f2f2f; color: #eee; border-color: #555; }
 .noche .clave-mal { color: #ef9a9a; }
+.organizar-acciones .boton-archivo { display: inline-flex; align-items: center; min-height: 40px; padding: 0 12px; border: 1px solid #9fb3c8; border-radius: 8px; background: #fff; cursor: pointer; }
+.organizar-acciones .boton-archivo.desactivado { opacity: 0.5; pointer-events: none; }
+.organizar-opcion { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.noche .organizar-acciones .boton-archivo { background: #2f2f2f; border-color: #555; }

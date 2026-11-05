@@ -16,7 +16,8 @@ import {
   TAMANOS_SELLO,
   TAMANOS_TEXTO,
 } from './opciones.ts'
-import { Organizar } from './Organizar.tsx'
+import { jpegDe, miniaturaDe, nombreDeFotos } from './fotos.ts'
+import { Organizar, type Modo } from './Organizar.tsx'
 import { ABIERTO, type Fuente } from './organizar.ts'
 import { Paginas } from './Paginas.tsx'
 import { Indice, Paleta, PanelAnotacion, Tamanos } from './Paneles.tsx'
@@ -134,7 +135,11 @@ export default function App() {
   const [pideClave, setPideClave] = useState<PideClave | null>(null)
   const [verAcerca, setVerAcerca] = useState(false)
   // Pantalla de organizar páginas (un PDF) o de unir PDFs, con los PDFs cuyas hojas muestra al abrirse.
-  const [organizar, setOrganizar] = useState<{ unir: boolean; fuentes: Fuente[] } | null>(null)
+  const [organizar, setOrganizar] = useState<{ modo: Modo; fuentes: Fuente[] } | null>(null)
+  // Crear PDF desde fotos: cada foto elegida (por su número) y su miniatura.
+  const fotos = useRef(new Map<number, { archivo: File; miniatura: string }>())
+  const siguienteFoto = useRef(0)
+  const [miniaturas, setMiniaturas] = useState<Record<number, string>>({})
   // Android: el selector devuelve el PDF elegido para unir por el mismo camino que «Abrir con».
   const esperandoAgregado = useRef<((ruta: string | null) => void) | null>(null)
   const salioParaElegir = useRef(false)
@@ -1028,6 +1033,9 @@ export default function App() {
   const cerrarOrganizar = useCallback(() => {
     setOrganizar(null)
     esperandoAgregado.current = null
+    for (const f of fotos.current.values()) URL.revokeObjectURL(f.miniatura)
+    fotos.current.clear()
+    setMiniaturas({})
     // Los PDFs agregados para unir ya no hacen falta: el motor los suelta.
     invoke('cerrar_agregados').catch(() => {})
   }, [])
@@ -1085,6 +1093,77 @@ export default function App() {
       console.error(e)
       setError('No se pudo abrir ese PDF para unirlo.')
       return []
+    }
+  }
+
+  /** Crear PDF desde fotos: prepara la miniatura de cada foto elegida; las que no se pueden leer se avisan. */
+  const prepararFotos = async (archivos: File[]): Promise<Fuente[]> => {
+    const nuevas: Fuente[] = []
+    let fallidas = 0
+    for (const archivo of archivos) {
+      try {
+        const miniatura = await miniaturaDe(archivo)
+        const id = siguienteFoto.current++
+        fotos.current.set(id, { archivo, miniatura })
+        setMiniaturas((m) => ({ ...m, [id]: miniatura }))
+        nuevas.push({ archivo: id, nombre: archivo.name, paginas: 1 })
+      } catch (e) {
+        console.error(e)
+        fallidas++
+      }
+    }
+    if (fallidas) {
+      setError(`No se pudo leer ${fallidas === 1 ? 'una de las fotos' : `${fallidas} de las fotos`}. Prueba con fotos JPG o PNG.`)
+    }
+    return nuevas
+  }
+
+  /** Arma el PDF con las fotos en ese orden y giro, lo guarda donde se elija y lo abre. */
+  const guardarFotos = async (hojas: Hoja[], a4: boolean) => {
+    if (guardando || !hojas.length) return
+    const nombre = nombreDeFotos()
+    setGuardando(true)
+    const puente = window.DakartaAndroid
+    let elegido: string | null = null
+    try {
+      // Android pregunta dónde guardar antes de preparar las fotos (Windows, al final).
+      if (puente?.guardar && puente.copiar) {
+        elegido = await esperarDestino(nombre)
+        if (!elegido) return
+      }
+      await invoke('fotos_vaciar')
+      for (const [i, h] of hojas.entries()) {
+        const foto = fotos.current.get(h.archivo)
+        if (!foto) throw new Error('Falta una foto')
+        setExito(`Preparando foto ${i + 1} de ${hojas.length}…`)
+        await invoke('fotos_agregar', await jpegDe(foto.archivo, h.giro))
+      }
+      setExito('')
+      let destino: string | null
+      if (puente?.copiar && elegido) {
+        const cache = await invoke<string>('fotos_en_cache', { a4 })
+        if (!puente.copiar(elegido, cache)) throw new Error('No se pudo guardar el PDF.')
+        puente.persistir(elegido)
+        destino = elegido
+        elegido = null
+      } else {
+        destino = await invoke<string | null>('fotos_guardar_copia', { nombre, a4 })
+        if (!destino) return
+      }
+      const guardado = destino
+      const nombreDestino = puente?.nombre(guardado) || guardado.split(/[\\/]/).pop() || nombre
+      setRecientes((lista) => guardarReciente(lista, { ruta: guardado, nombre: nombreDestino }))
+      cerrarOrganizar()
+      setExito('PDF creado')
+      siPuedeCambiar(() => abrirEn(guardado, { ruta: guardado, nombre: nombreDestino }))
+    } catch (e) {
+      console.error(e)
+      setExito('')
+      setError('No se pudo crear el PDF. Inténtalo otra vez.')
+    } finally {
+      // Si falló después de elegir dónde guardar, el archivo vacío que se creó no se queda.
+      if (elegido) puente?.borrar?.(elegido)
+      setGuardando(false)
     }
   }
 
@@ -1664,7 +1743,7 @@ export default function App() {
               className="version-indice"
               onClick={() => {
                 setVerIndice(false)
-                setOrganizar({ unir: false, fuentes: [fuenteAbierta(doc)] })
+                setOrganizar({ modo: 'organizar', fuentes: [fuenteAbierta(doc)] })
               }}
             >
               Organizar páginas
@@ -1673,10 +1752,19 @@ export default function App() {
               className="version-indice"
               onClick={() => {
                 setVerIndice(false)
-                setOrganizar({ unir: true, fuentes: [fuenteAbierta(doc)] })
+                setOrganizar({ modo: 'unir', fuentes: [fuenteAbierta(doc)] })
               }}
             >
               Unir con otros PDFs
+            </button>
+            <button
+              className="version-indice"
+              onClick={() => {
+                setVerIndice(false)
+                setOrganizar({ modo: 'fotos', fuentes: [] })
+              }}
+            >
+              Crear PDF desde fotos
             </button>
             <button
               className="version-indice"
@@ -1893,8 +1981,11 @@ export default function App() {
             <button className="grande" onClick={abrir} disabled={abriendo}>
               {abriendo ? 'Abriendo…' : 'Abrir un PDF'}
             </button>
-            <button className="unir-inicio" onClick={() => setOrganizar({ unir: true, fuentes: [] })} disabled={abriendo}>
+            <button className="unir-inicio" onClick={() => setOrganizar({ modo: 'unir', fuentes: [] })} disabled={abriendo}>
               Unir PDFs
+            </button>
+            <button className="unir-inicio" onClick={() => setOrganizar({ modo: 'fotos', fuentes: [] })} disabled={abriendo}>
+              Crear PDF desde fotos
             </button>
             {error && <p className="error">{error}</p>}
             {recientes.length > 0 && (
@@ -1950,10 +2041,16 @@ export default function App() {
       {organizar && (
         <Organizar
           fuentes={organizar.fuentes}
-          unir={organizar.unir}
+          modo={organizar.modo}
           onAgregar={agregarPdf}
+          onFotos={prepararFotos}
+          miniaturas={miniaturas}
           guardando={guardando}
-          onGuardar={(hojas, extraer) => void guardarCopia({ hojas, extraer, unir: organizar.unir })}
+          onGuardar={(hojas, extraer, a4) =>
+            void (organizar.modo === 'fotos'
+              ? guardarFotos(hojas, a4)
+              : guardarCopia({ hojas, extraer, unir: organizar.modo === 'unir' }))
+          }
           onCerrar={cerrarOrganizar}
           aviso={exito}
           error={error}
