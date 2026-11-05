@@ -369,3 +369,14 @@ fn abre_word_epub_txt_e_imagen_para_leer_buscar_y_copiar() {
         std::fs::remove_file(&sin_nombre).unwrap();
     }
 }
+
+#[test]
+fn un_word_antiguo_da_un_mensaje_claro() {
+    let ruta = std::env::temp_dir().join(format!("dakarta-doc-viejo-{}", std::process::id()));
+    let mut bytes = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1".to_vec();
+    bytes.resize(2048, 0);
+    std::fs::write(&ruta, bytes).unwrap();
+    let e = abrir_doc(ruta.to_str().unwrap(), "informe.docx").err().unwrap();
+    assert!(e.contains("Office antiguo"), "{e}");
+    std::fs::remove_file(&ruta).unwrap();
+}
