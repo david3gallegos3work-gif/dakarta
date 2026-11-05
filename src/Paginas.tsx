@@ -34,6 +34,7 @@ export const Paginas = memo(function Paginas({
   palabras,
   enlaces,
   onEnlace,
+  alVerse,
 }: {
   doc: Doc
   ancho: number
@@ -56,15 +57,19 @@ export const Paginas = memo(function Paginas({
   palabras?: Record<number, Palabra[]>
   enlaces?: Record<number, Enlace[]>
   onEnlace: (n: number) => void
+  /** Se llama cuando la primera hoja ya se ve: el documento abrió bien. */
+  alVerse: () => void
 }) {
   // Alto/ancho real de las páginas ya pintadas que no miden como la primera.
   const [prop, setProp] = useState<Record<number, number>>({})
   const vistas = useRef(new Set<number>())
   const base = doc.info.alto / doc.info.ancho
   const medida = useCallback(
-    (n: number, real: number) =>
-      setProp((x) => (Math.abs(real - (x[n] ?? base)) > 0.01 * base ? { ...x, [n]: real } : x)),
-    [base],
+    (n: number, real: number) => {
+      alVerse()
+      setProp((x) => (Math.abs(real - (x[n] ?? base)) > 0.01 * base ? { ...x, [n]: real } : x))
+    },
+    [base, alVerse],
   )
   for (let i = Math.max(0, centro - VENTANA); i <= Math.min(doc.info.paginas - 1, centro + VENTANA); i++) {
     vistas.current.add(i)

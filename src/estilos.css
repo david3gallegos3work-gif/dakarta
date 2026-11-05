@@ -244,3 +244,6 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .noche .organizar-acciones { background: #242424; border-color: #3a3a3a; }
 .noche .organizar-acciones button { background: #2f2f2f; border-color: #555; }
 .noche .organizar-acciones .grande { background: #1565c0; }
+.recientes-tipo h3 { margin: 10px 0 4px; font-size: 13px; font-weight: 600; color: #607d8b; text-transform: uppercase; letter-spacing: 0.04em; }
+.recientes-tipo + .recientes-tipo { margin-top: 2px; }
+.noche .recientes-tipo h3 { color: #9fb3c8; }
