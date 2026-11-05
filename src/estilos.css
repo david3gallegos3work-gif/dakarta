@@ -254,3 +254,8 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .unir-inicio:disabled { opacity: 0.5; }
 .noche .organizar-archivos { background: #242424; border-color: #3a3a3a; }
 .noche .unir-inicio { background: #1e1e1e; color: #90caf9; border-color: #90caf9; }
+/* Círculo para girar la anotación elegida: arriba, al centro. */
+.anot .girador { position: absolute; left: 50%; top: -34px; display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin-left: -13px; border: 2px solid #fff; border-radius: 50%; background: #f57c00; color: #fff; box-shadow: 0 0 0 1px #f57c00; touch-action: none; cursor: grab; }
+.anot .girador svg { width: 16px; height: 16px; }
+.anot .girador::after { content: ''; position: absolute; top: 26px; left: 50%; width: 2px; height: 8px; margin-left: -1px; background: #f57c00; }
+.noche .anot .girador { background: #ffb74d; box-shadow: 0 0 0 1px #ffb74d; }

@@ -149,6 +149,8 @@ struct DatosAnotacion {
     opacidad: f32,
     trazos: Vec<Vec<Point>>,
     quads: Vec<Quad>,
+    /// Texto, nota y sello: giro del cuadro (0, 90, 180 o 270). El PDF solo los gira en pasos de 90°.
+    giro: i32,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -294,6 +296,8 @@ enum Pedido {
         resp: Sender<Result<bool, String>>,
     },
     Borrar { n: i32, xref: i32, resp: Sender<Result<(), String>> },
+    /// Girar una anotación (grados con el reloj; texto en pasos de 90°).
+    Girar { n: i32, xref: i32, grados: f32, resp: Sender<Result<(), String>> },
     Deshacer { resp: Sender<Result<Option<i32>, String>> },
     DeshacerTodo { resp: Sender<Result<bool, String>> },
     Campos { resp: Sender<Result<Vec<Campo>, String>> },
@@ -469,6 +473,18 @@ impl Motor {
                                 None => Err("No hay un documento abierto".into()),
                                 Some((doc, _)) => datos_de(doc, n, xref).and_then(|antes| {
                                     redimensionar_anotacion(doc, n, xref, x, y, w, h).map(|()| {
+                                        hechas.push(Hecho::Cambio { n, xref, antes });
+                                        cache.olvidar_pagina(n);
+                                    })
+                                }),
+                            };
+                            let _ = resp.send(r);
+                        }
+                        Pedido::Girar { n, xref, grados, resp } => {
+                            let r = match &mut abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => datos_de(doc, n, xref).and_then(|antes| {
+                                    girar_anotacion(doc, n, xref, grados).map(|()| {
                                         hechas.push(Hecho::Cambio { n, xref, antes });
                                         cache.olvidar_pagina(n);
                                     })
@@ -728,6 +744,12 @@ impl Motor {
     pub fn mover_anotacion(&self, n: i32, xref: i32, dx: f32, dy: f32) -> Result<(), String> {
         let (tx, rx) = mpsc::channel();
         self.0.send(Pedido::Mover { n, xref, dx, dy, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
+    pub fn girar_anotacion(&self, n: i32, xref: i32, grados: f32) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Girar { n, xref, grados, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 

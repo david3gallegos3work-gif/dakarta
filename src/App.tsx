@@ -923,6 +923,26 @@ export default function App() {
     [refrescar, fallo],
   )
 
+  const girarAnotacion = useCallback(
+    (a: Anotacion, grados: number) => {
+      invoke('girar_anotacion', { pagina: a.pagina, xref: a.xref, grados })
+        .then(async () => {
+          refrescar(a.pagina)
+          setSucio(true)
+          setHechas((n) => n + 1)
+          // Girada, la caja cambia de forma: sigue elegida con su caja nueva para poder seguir girándola.
+          const lista = await invoke<Anotacion[]>('anotaciones', { pagina: a.pagina })
+          setAnots((m) => ({ ...m, [a.pagina]: lista }))
+          setSeleccion((s) => (s && s.xref === a.xref ? (lista.find((x) => x.xref === a.xref) ?? null) : s))
+        })
+        .catch((e) => {
+          fallo(e)
+          refrescar(a.pagina)
+        })
+    },
+    [refrescar, fallo],
+  )
+
   const borrarAnotacion = useCallback(
     async (a: Anotacion) => {
       try {
@@ -1728,6 +1748,7 @@ export default function App() {
                 onSeleccionar={seleccionarAnotacion}
                 onMover={moverAnotacion}
                 onRedimensionar={redimensionarAnotacion}
+                onGirar={girarAnotacion}
                 palabras={seleccionTexto ? palabras : undefined}
                 enlaces={!editando && !seleccionTexto ? enlaces : undefined}
                 onEnlace={ir}

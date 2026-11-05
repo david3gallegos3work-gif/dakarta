@@ -31,6 +31,7 @@ export const Paginas = memo(function Paginas({
   onSeleccionar,
   onMover,
   onRedimensionar,
+  onGirar,
   palabras,
   enlaces,
   onEnlace,
@@ -54,6 +55,7 @@ export const Paginas = memo(function Paginas({
   onSeleccionar: (a: Anotacion) => void
   onMover: (a: Anotacion, dx: number, dy: number) => void
   onRedimensionar: (a: Anotacion, w: number, h: number) => void
+  onGirar: (a: Anotacion, grados: number) => void
   palabras?: Record<number, Palabra[]>
   enlaces?: Record<number, Enlace[]>
   onEnlace: (n: number) => void
@@ -119,6 +121,7 @@ export const Paginas = memo(function Paginas({
         onSeleccionar={onSeleccionar}
         onMover={onMover}
         onRedimensionar={onRedimensionar}
+        onGirar={onGirar}
         palabras={palabras?.[n]}
         enlaces={enlaces?.[n]}
         onEnlace={onEnlace}
@@ -147,6 +150,7 @@ export const Pagina = memo(function Pagina({
   onSeleccionar,
   onMover,
   onRedimensionar,
+  onGirar,
   palabras,
   enlaces,
   onEnlace,
@@ -170,6 +174,7 @@ export const Pagina = memo(function Pagina({
   onSeleccionar: (a: Anotacion) => void
   onMover: (a: Anotacion, dx: number, dy: number) => void
   onRedimensionar: (a: Anotacion, w: number, h: number) => void
+  onGirar: (a: Anotacion, grados: number) => void
   palabras?: Palabra[]
   enlaces?: Enlace[]
   onEnlace: (n: number) => void
@@ -229,6 +234,7 @@ export const Pagina = memo(function Pagina({
           onSeleccionar={onSeleccionar}
           onMover={onMover}
           onRedimensionar={onRedimensionar}
+          onGirar={onGirar}
         />
       ))}
       {resaltados?.map(({ c, i }) => (
@@ -314,6 +320,7 @@ export function CajaAnotacion({
   onSeleccionar,
   onMover,
   onRedimensionar,
+  onGirar,
 }: {
   a: Anotacion
   ancho: number
@@ -322,12 +329,19 @@ export function CajaAnotacion({
   onSeleccionar: (a: Anotacion) => void
   onMover: (a: Anotacion, dx: number, dy: number) => void
   onRedimensionar: (a: Anotacion, w: number, h: number) => void
+  onGirar: (a: Anotacion, grados: number) => void
 }) {
   const inicio = useRef<{ x: number; y: number } | null>(null)
   const [desp, setDesp] = useState<{ x: number; y: number } | null>(null)
   /** El tamaño mientras se arrastra la esquina: el estado pinta y la ref guarda el último valor. */
   const medida = useRef<{ w: number; h: number } | null>(null)
   const [vista, setVista] = useState<{ w: number; h: number } | null>(null)
+  /** Giro mientras se arrastra el círculo de girar: el centro de la caja y el ángulo de partida. */
+  const giro = useRef<{ cx: number; cy: number; desde: number; grados: number } | null>(null)
+  const [giroVista, setGiroVista] = useState(0)
+  // El lápiz y la firma giran a cualquier ángulo; el texto, la nota y el sello, en pasos de 90° (como el PDF).
+  const giraLibre = a.tipo === 'tinta'
+  const gira = giraLibre || a.tipo === 'texto'
   // La firma y el lápiz crecen en proporción; el texto y el sello, a lo que se arrastre.
   const enProporcion = a.tipo === 'tinta'
   const w = vista?.w ?? a.w
@@ -340,7 +354,9 @@ export function CajaAnotacion({
         top: `${a.y * 100}%`,
         width: `${w * 100}%`,
         height: `${h * 100}%`,
-        transform: desp ? `translate(${desp.x}px, ${desp.y}px)` : undefined,
+        transform:
+          [desp ? `translate(${desp.x}px, ${desp.y}px)` : '', giroVista ? `rotate(${giroVista}deg)` : ''].join(' ').trim() ||
+          undefined,
       }}
       title={TITULOS_ANOTACION[a.tipo]}
       onPointerDown={(e) => {
@@ -371,6 +387,47 @@ export function CajaAnotacion({
         setDesp(null)
       }}
     >
+      {seleccionada && gira && (
+        <span
+          className="girador"
+          title="Arrastra para girar"
+          onPointerDown={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            e.currentTarget.setPointerCapture(e.pointerId)
+            const caja = e.currentTarget.parentElement!.getBoundingClientRect()
+            const cx = caja.left + caja.width / 2
+            const cy = caja.top + caja.height / 2
+            giro.current = { cx, cy, desde: Math.atan2(e.clientY - cy, e.clientX - cx), grados: 0 }
+          }}
+          onPointerMove={(e) => {
+            const g = giro.current
+            if (!g) return
+            e.stopPropagation()
+            e.preventDefault()
+            let grados = ((Math.atan2(e.clientY - g.cy, e.clientX - g.cx) - g.desde) * 180) / Math.PI
+            grados = ((grados + 540) % 360) - 180
+            if (!giraLibre) grados = Math.round(grados / 90) * 90
+            g.grados = grados
+            setGiroVista(grados)
+          }}
+          onPointerUp={() => {
+            const g = giro.current
+            giro.current = null
+            setGiroVista(0)
+            if (g && Math.abs(g.grados) >= (giraLibre ? 2 : 45)) onGirar(a, g.grados)
+          }}
+          onPointerCancel={() => {
+            giro.current = null
+            setGiroVista(0)
+          }}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M19 12a7 7 0 1 1-2.05-4.95" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
+            <path d="M19.5 3.5v4.5H15" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+      )}
       {seleccionada && (
         <span
           className="tirador"
