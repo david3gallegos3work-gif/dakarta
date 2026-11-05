@@ -17,7 +17,15 @@ import {
 import { Organizar } from './Organizar.tsx'
 import { Paginas } from './Paginas.tsx'
 import { Indice, Paleta, PanelAnotacion, Tamanos } from './Paneles.tsx'
-import { guardarReciente, leerRecientes, marcarAbriendo, olvidarReciente, seCerroAbriendo, type Reciente } from './recientes.ts'
+import {
+  guardarReciente,
+  leerRecientes,
+  marcarAbriendo,
+  olvidarReciente,
+  porTipo,
+  seCerroAbriendo,
+  type Reciente,
+} from './recientes.ts'
 import type {
   Ancla,
   Anotacion,
@@ -56,6 +64,8 @@ function esperarDestino(nombre: string): Promise<string | null> {
 }
 
 const MARGEN = 8
+/** Fija (no se crea en cada dibujo): así las hojas no se vuelven a dibujar por recibir una función nueva. */
+const quitarMarcaAbriendo = () => marcarAbriendo(false)
 
 const fijar = (poner: (f: (r: Rango) => Rango) => void, a: number, b: number) =>
   poner((r) => (r[0] === a && r[1] === b ? r : [a, b]))
@@ -586,9 +596,9 @@ export default function App() {
       if (reciente) setRecientes((lista) => olvidarReciente(lista, reciente.ruta))
     } finally {
       setAbriendo(false)
-      // Si la app se cierra mientras se pintan las primeras hojas, la marca queda puesta.
-      if (abierto) setTimeout(() => marcarAbriendo(false), 5000)
-      else marcarAbriendo(false)
+      // Si abrió, la marca se quita al verse la primera hoja (o al salir de la app): si la app se cerrara
+      // mientras se pinta, la marca quedaría puesta y la próxima vez no se reabre solo.
+      if (!abierto) marcarAbriendo(false)
     }
   }
 
@@ -1147,14 +1157,20 @@ export default function App() {
         // Si la vez anterior la app se cerró abriendo un PDF, no se reabre solo: se cerraría otra vez.
         if (seCerroAbriendo()) {
           marcarAbriendo(false)
-          setError(`La última vez Dakarta se cerró al abrir un PDF. Si quieres, abre «${ultimo.nombre}» con «Abrir».`)
+          setError(`La última vez Dakarta se cerró al abrir un documento. Si quieres, abre «${ultimo.nombre}» con «Abrir».`)
         } else abrirRuta(ultimo.ruta, ultimo)
       }
     })
+    // Si se sale de la app, el documento no la cerró: la marca de «abriendo» ya no hace falta.
+    const alSalir = () => {
+      if (document.visibilityState === 'hidden') marcarAbriendo(false)
+    }
+    document.addEventListener('visibilitychange', alSalir)
     document.addEventListener('visibilitychange', pendiente)
     window.addEventListener('focus', pendiente)
     buscarActualizacion().then(setNueva)
     return () => {
+      document.removeEventListener('visibilitychange', alSalir)
       document.removeEventListener('visibilitychange', pendiente)
       window.removeEventListener('focus', pendiente)
     }
@@ -1643,6 +1659,7 @@ export default function App() {
               <Paginas
                 key={doc.id}
                 doc={doc}
+                alVerse={quitarMarcaAbriendo}
                 ancho={ancho}
                 anchoPedido={anchoPedido}
                 centro={centro}
@@ -1705,15 +1722,20 @@ export default function App() {
             {recientes.length > 0 && (
               <div className="recientes">
                 <h2>Últimos archivos</h2>
-                <ul>
-                  {recientes.map((r) => (
-                    <li key={r.ruta}>
-                      <button onClick={() => abrirReciente(r)} disabled={abriendo} title={r.nombre}>
-                        {r.nombre}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                {porTipo(recientes).map((g) => (
+                  <section key={g.titulo} className="recientes-tipo">
+                    <h3>{g.titulo}</h3>
+                    <ul>
+                      {g.recientes.map((r) => (
+                        <li key={r.ruta}>
+                          <button onClick={() => abrirReciente(r)} disabled={abriendo} title={r.nombre}>
+                            {r.nombre}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ))}
               </div>
             )}
             <details className="panel-acerca">
