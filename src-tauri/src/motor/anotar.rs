@@ -144,7 +144,7 @@ pub(super) fn anotar_caja(
     let tamano = tamano.clamp(LETRA_MIN, 72.0);
     let x0 = caja.x0 + x.clamp(0.0, 1.0) * caja.width();
     let y0 = caja.y0 + y.clamp(0.0, 1.0) * caja.height();
-    let rect = caja_justa(x0, y0, contenido, tamano, caja)?;
+    let rect = caja_justa(x0, y0, contenido, tamano, caja, 0)?;
     let mut pdf = doc.load_pdf_page(n).map_err(texto)?;
     let mut annot = pdf.add_free_text_annotation(rect, contenido).map_err(texto)?;
     annot
@@ -248,7 +248,12 @@ pub(super) fn leer_datos(a: &PdfAnnotation) -> Result<Option<DatosAnotacion>, St
         TipoAnot::Resaltar | TipoAnot::Subrayar | TipoAnot::Tachar => a.quads().map_err(texto)?,
         _ => Vec::new(),
     };
-    Ok(Some(DatosAnotacion { tipo, rect, contenido, color, tamano, opacidad, trazos, quads }))
+    let giro = if tipo == TipoAnot::Texto {
+        a.object().get_dict("Rotate").ok().flatten().and_then(|r| r.as_int().ok()).unwrap_or(0).rem_euclid(360)
+    } else {
+        0
+    };
+    Ok(Some(DatosAnotacion { tipo, rect, contenido, color, tamano, opacidad, trazos, quads, giro }))
 }
 
 /// Caja de una anotación de tinta: la que ocupan sus trazos, con un punto de margen para poder tocarla.
@@ -322,6 +327,12 @@ pub(super) fn aplicar_datos(a: &mut PdfAnnotation, d: &DatosAnotacion) -> Result
             // El color de una FreeText se usa como relleno del cuadro: aquí solo va el color del texto.
             a.set_default_appearance("Helv", d.tamano, Some(anotacion_color(d.color))).map_err(texto)?;
             poner_borde(a, d.tamano, d.rect)?;
+            // /Rotate gira el texto dentro de su caja (MuPDF y Adobe lo respetan en pasos de 90°).
+            if d.giro == 0 {
+                a.object().dict_delete("Rotate").map_err(texto)?;
+            } else {
+                a.object().dict_put("Rotate", PdfObject::new_int(d.giro).map_err(texto)?).map_err(texto)?;
+            }
         }
         TipoAnot::Tinta => {
             a.set_color(anotacion_color(d.color)).map_err(texto)?;
@@ -451,8 +462,12 @@ pub(super) fn medida_texto(contenido: &str, tamano: f32, max_ancho: f32) -> Resu
 }
 
 /// Cuadro pegado al texto con su esquina en (x0, y0), sin salirse de la hoja.
-pub(super) fn caja_justa(x0: f32, y0: f32, contenido: &str, tamano: f32, caja: Rect) -> Result<Rect, String> {
-    let (ancho, alto) = medida_texto(contenido, tamano, caja.width() * 0.9)?;
+pub(super) fn caja_justa(x0: f32, y0: f32, contenido: &str, tamano: f32, caja: Rect, giro: i32) -> Result<Rect, String> {
+    let (mut ancho, mut alto) = medida_texto(contenido, tamano, caja.width() * 0.9)?;
+    // Girado de lado, el cuadro ocupa en la hoja el ancho como alto y al revés.
+    if giro.rem_euclid(180) == 90 {
+        (ancho, alto) = (alto, ancho);
+    }
     let x0 = x0.min(caja.x1 - ancho).max(caja.x0);
     let y0 = y0.min(caja.y1 - alto).max(caja.y0);
     Ok(Rect::new(x0, y0, x0 + ancho, y0 + alto))
@@ -494,7 +509,7 @@ pub(super) fn editar_anotacion(
     }
     // El cuadro se recalcula solo si cambió el texto o la letra: un cambio de color no borra el tamaño elegido.
     if d.tipo == TipoAnot::Texto && (contenido.is_some() || tamano.is_some()) {
-        d.rect = caja_justa(d.rect.x0, d.rect.y0, &d.contenido, d.tamano, caja)?;
+        d.rect = caja_justa(d.rect.x0, d.rect.y0, &d.contenido, d.tamano, caja, d.giro)?;
     }
     // Se cambia la misma anotación: conserva su número y el panel puede seguir aplicando cambios.
     editar_en_pagina(doc, n, xref, &d)?;
@@ -544,7 +559,53 @@ pub(super) fn redimensionar_anotacion(doc: &mut PdfDocument, n: i32, xref: i32, 
         _ => {}
     }
     // La letra acompaña al cuadro y el cuadro vuelve a quedar pegado a la letra.
-    d.rect = if d.tipo == TipoAnot::Texto { caja_justa(nuevo.x0, nuevo.y0, &d.contenido, d.tamano, caja)? } else { nuevo };
+    d.rect = if d.tipo == TipoAnot::Texto { caja_justa(nuevo.x0, nuevo.y0, &d.contenido, d.tamano, caja, d.giro)? } else { nuevo };
+    editar_en_pagina(doc, n, xref, &d)
+}
+
+/// Gira una anotación `grados` en el sentido del reloj, alrededor de su centro. El lápiz y la firma giran
+/// a cualquier ángulo; el texto, la nota y el sello, en pasos de 90° (lo que permite un PDF sin dejar de
+/// ser texto editable). Si al girar se sale de la hoja, se empuja hacia adentro.
+pub(super) fn girar_anotacion(doc: &mut PdfDocument, n: i32, xref: i32, grados: f32) -> Result<(), String> {
+    if !grados.is_finite() {
+        return Err("El giro no es válido.".into());
+    }
+    let caja = doc.load_page(n).and_then(|p| p.bounds()).map_err(texto)?;
+    let mut d = datos_de(doc, n, xref)?;
+    let (cx, cy) = ((d.rect.x0 + d.rect.x1) / 2.0, (d.rect.y0 + d.rect.y1) / 2.0);
+    match d.tipo {
+        TipoAnot::Tinta => {
+            let (sen, cos) = grados.to_radians().sin_cos();
+            for p in d.trazos.iter_mut().flatten() {
+                let (dx, dy) = (p.x - cx, p.y - cy);
+                // En la hoja la y crece hacia abajo: así el giro va con el reloj, como en la pantalla.
+                p.x = cx + dx * cos - dy * sen;
+                p.y = cy + dx * sen + dy * cos;
+            }
+            let r = rect_de_trazos(&d.trazos);
+            let mx = fijar(0.0, caja.x0 - r.x0, caja.x1 - r.x1);
+            let my = fijar(0.0, caja.y0 - r.y0, caja.y1 - r.y1);
+            for p in d.trazos.iter_mut().flatten() {
+                p.x += mx;
+                p.y += my;
+            }
+        }
+        TipoAnot::Texto => {
+            let paso = (grados / 90.0).round() as i32 * 90;
+            if paso.rem_euclid(360) == 0 {
+                return Ok(());
+            }
+            // /Rotate de un PDF gira contra el reloj: un giro con el reloj se resta.
+            d.giro = (d.giro - paso).rem_euclid(360);
+            if paso.rem_euclid(180) == 90 {
+                let (w, h) = (d.rect.height(), d.rect.width());
+                let x0 = (cx - w / 2.0).min(caja.x1 - w).max(caja.x0);
+                let y0 = (cy - h / 2.0).min(caja.y1 - h).max(caja.y0);
+                d.rect = Rect::new(x0, y0, x0 + w, y0 + h);
+            }
+        }
+        _ => return Err("Esta anotación no se puede girar.".into()),
+    }
     editar_en_pagina(doc, n, xref, &d)
 }
 

@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use mupdf::color::AnnotationColor;
 use mupdf::pdf::annotation::{AnnotationTextAlign, PdfAnnotation, PdfAnnotationType};
-use mupdf::pdf::document::{PdfDocument, PdfWriteOptions};
+use mupdf::pdf::document::{Encryption, PdfDocument, PdfWriteOptions};
 use mupdf::pdf::{PdfObject, PdfPage, WidgetType};
 use mupdf::point::Point;
 use mupdf::quad::Quad;
@@ -41,6 +41,8 @@ pub struct Info {
     alto: f32,
     indice: Vec<Entrada>,
     ms: u128,
+    /// Se abrió con contraseña: la pantalla ofrece quitarla.
+    con_clave: bool,
     /// Para volver a abrirlo después (ruta en Windows, content:// en Android).
     ruta: String,
     nombre: String,
@@ -149,6 +151,8 @@ struct DatosAnotacion {
     opacidad: f32,
     trazos: Vec<Vec<Point>>,
     quads: Vec<Quad>,
+    /// Texto, nota y sello: giro del cuadro (0, 90, 180 o 270). El PDF solo los gira en pasos de 90°.
+    giro: i32,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -232,7 +236,7 @@ impl Hecho {
 }
 
 enum Pedido {
-    Abrir { ruta: String, archivo: Option<File>, resp: Sender<Result<Info, String>> },
+    Abrir { ruta: String, archivo: Option<File>, clave: Option<String>, resp: Sender<Result<Info, String>> },
     Buscar { texto: String, resp: Sender<Result<Busqueda, String>> },
     CancelarBusqueda,
     Pagina(PedidoPagina),
@@ -294,14 +298,17 @@ enum Pedido {
         resp: Sender<Result<bool, String>>,
     },
     Borrar { n: i32, xref: i32, resp: Sender<Result<(), String>> },
+    /// Girar una anotación (grados con el reloj; texto en pasos de 90°).
+    Girar { n: i32, xref: i32, grados: f32, resp: Sender<Result<(), String>> },
     Deshacer { resp: Sender<Result<Option<i32>, String>> },
     DeshacerTodo { resp: Sender<Result<bool, String>> },
     Campos { resp: Sender<Result<Vec<Campo>, String>> },
     Campo { n: i32, xref: i32, valor: String, resp: Sender<Result<(), String>> },
     /// Con `hojas`, guarda un PDF nuevo con esas hojas en ese orden (organizar o extraer páginas).
-    Guardar { destino: String, hojas: Option<Vec<Hoja>>, resp: Sender<Result<(), String>> },
+    /// Con `proteccion`, una copia con esa contraseña (vacía: sin contraseña).
+    Guardar { destino: String, hojas: Option<Vec<Hoja>>, proteccion: Option<String>, resp: Sender<Result<(), String>> },
     /// Abre otro PDF para unirlo; devuelve su número y cuántas páginas tiene.
-    AbrirAgregado { ruta: String, archivo: Option<File>, resp: Sender<Result<(usize, i32), String>> },
+    AbrirAgregado { ruta: String, archivo: Option<File>, clave: Option<String>, resp: Sender<Result<(usize, i32), String>> },
     CerrarAgregados,
 }
 
@@ -314,8 +321,10 @@ impl Motor {
         std::thread::spawn(move || {
             // En Android el archivo viaja con el documento: si se cerrara, MuPDF perdería el acceso.
             let mut abierto: Option<(PdfDocument, Option<File>)> = None;
+            // Contraseña con que se abrió (si tenía): hace falta para organizar o unir una copia cifrada.
+            let mut clave_abierta: Option<String> = None;
             // PDFs agregados para unir: se leen mientras está abierta la pantalla de unir.
-            let mut agregados: Vec<(PdfDocument, Option<File>, String)> = Vec::new();
+            let mut agregados: Vec<(PdfDocument, Option<File>, String, Option<String>)> = Vec::new();
             let mut ruta_abierta = String::new();
             // Anotaciones y campos cambiados en esta sesión, para deshacer.
             let mut hechas: Vec<Hecho> = Vec::new();
@@ -334,13 +343,14 @@ impl Motor {
                 };
                 for pedido in primero.into_iter().chain(rx.try_iter()) {
                     match pedido {
-                        Pedido::Abrir { ruta, archivo, resp } => {
+                        Pedido::Abrir { ruta, archivo, clave, resp } => {
                             if let Some(b) = busqueda.take() {
                                 b.cancelar();
                             }
-                            let r = abrir_doc(&ruta).map(|(doc, info)| {
+                            let r = abrir_doc(&ruta, clave.as_deref()).map(|(doc, info)| {
                                 abierto = Some((doc, archivo));
                                 ruta_abierta = ruta;
+                                clave_abierta = clave;
                                 hechas.clear();
                                 cache.vaciar();
                                 // Lo que faltaba del documento anterior ya nadie lo está esperando.
@@ -476,6 +486,18 @@ impl Motor {
                             };
                             let _ = resp.send(r);
                         }
+                        Pedido::Girar { n, xref, grados, resp } => {
+                            let r = match &mut abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => datos_de(doc, n, xref).and_then(|antes| {
+                                    girar_anotacion(doc, n, xref, grados).map(|()| {
+                                        hechas.push(Hecho::Cambio { n, xref, antes });
+                                        cache.olvidar_pagina(n);
+                                    })
+                                }),
+                            };
+                            let _ = resp.send(r);
+                        }
                         Pedido::Borrar { n, xref, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
@@ -529,28 +551,34 @@ impl Motor {
                             };
                             let _ = resp.send(r);
                         }
-                        Pedido::AbrirAgregado { ruta, archivo, resp } => {
-                            let r = abrir_doc(&ruta).map(|(doc, info)| {
-                                agregados.push((doc, archivo, ruta));
+                        Pedido::AbrirAgregado { ruta, archivo, clave, resp } => {
+                            let r = abrir_doc(&ruta, clave.as_deref()).map(|(doc, info)| {
+                                agregados.push((doc, archivo, ruta, clave));
                                 (agregados.len() - 1, info.paginas)
                             });
                             let _ = resp.send(r);
                         }
                         Pedido::CerrarAgregados => agregados.clear(),
-                        Pedido::Guardar { destino, hojas, resp }
+                        Pedido::Guardar { destino, hojas, resp, .. }
                             if hojas.as_ref().is_some_and(|h| h.iter().any(|x| x.archivo != ABIERTO)) =>
                         {
-                            let docs: Vec<&PdfDocument> = agregados.iter().map(|(d, _, _)| d).collect();
-                            let pisa = agregados.iter().any(|(_, _, r)| mismo_archivo(r, &destino))
+                            let docs: Vec<(&PdfDocument, Option<&str>)> =
+                                agregados.iter().map(|(d, _, _, c)| (d, c.as_deref())).collect();
+                            let pisa = agregados.iter().any(|(_, _, r, _)| mismo_archivo(r, &destino))
                                 || abierto.is_some() && mismo_archivo(&ruta_abierta, &destino);
                             let r = if pisa {
                                 Err("No se puede guardar encima de uno de los PDFs que se unen. Elige otro nombre.".into())
                             } else {
-                                unir_y_guardar(abierto.as_ref().map(|(d, _)| d), &docs, hojas.as_deref().unwrap_or_default(), &destino)
+                                unir_y_guardar(
+                                    abierto.as_ref().map(|(d, _)| (d, clave_abierta.as_deref())),
+                                    &docs,
+                                    hojas.as_deref().unwrap_or_default(),
+                                    &destino,
+                                )
                             };
                             let _ = resp.send(r);
                         }
-                        Pedido::Guardar { destino, hojas, resp } => {
+                        Pedido::Guardar { destino, hojas, proteccion, resp } => {
                             let r = match &abierto {
                                 None => Err("No hay un documento abierto".into()),
                                 // Lo guardado queda como punto de partida: ya no se deshace.
@@ -558,9 +586,19 @@ impl Motor {
                                     "No se puede guardar encima del PDF abierto. Elige otro nombre.".into(),
                                 ),
                                 // Organizar no cambia el PDF abierto: sus cambios siguen pudiendo deshacerse.
-                                Some((doc, _)) => match &hojas {
-                                    Some(h) => organizar_y_guardar(doc, h, &destino),
-                                    None => guardar_doc(doc, &destino).map(|()| hechas.clear()),
+                                Some((doc, _)) => match (&hojas, proteccion) {
+                                    (Some(h), _) => organizar_y_guardar(doc, h, &destino, clave_abierta.as_deref()),
+                                    // Poner o quitar la contraseña: una copia aparte. MuPDF le deja al abierto la
+                                    // contraseña nueva (sus siguientes copias la llevan): se recuerda la nueva.
+                                    (None, Some(p)) => Proteccion::de(&p).and_then(|p| {
+                                        guardar_doc_con(doc, &destino, &p)?;
+                                        clave_abierta = match p {
+                                            Proteccion::Poner(c) => Some(c),
+                                            _ => None,
+                                        };
+                                        Ok(())
+                                    }),
+                                    (None, None) => guardar_doc(doc, &destino).map(|()| hechas.clear()),
                                 },
                             };
                             let _ = resp.send(r);
@@ -611,7 +649,7 @@ impl Motor {
                 if let Some(a) = p.archivo {
                     // Miniatura de un PDF agregado para unir: no se guarda en la memoria de páginas.
                     let r = match agregados.get(a) {
-                        Some((doc, _, _)) => pintar(doc, p.n, p.ancho),
+                        Some((doc, _, _, _)) => pintar(doc, p.n, p.ancho),
                         None => Err("Ese PDF ya no está".into()),
                     };
                     p.resp.respond(respuesta(r));
@@ -636,9 +674,9 @@ impl Motor {
         Motor(tx)
     }
 
-    pub fn abrir(&self, ruta: String, archivo: Option<File>) -> Result<Info, String> {
+    pub fn abrir(&self, ruta: String, archivo: Option<File>, clave: Option<String>) -> Result<Info, String> {
         let (tx, rx) = mpsc::channel();
-        self.0.send(Pedido::Abrir { ruta, archivo, resp: tx }).map_err(texto)?;
+        self.0.send(Pedido::Abrir { ruta, archivo, clave, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
@@ -731,6 +769,12 @@ impl Motor {
         rx.recv().map_err(texto)?
     }
 
+    pub fn girar_anotacion(&self, n: i32, xref: i32, grados: f32) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Girar { n, xref, grados, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
     pub fn redimensionar_anotacion(&self, n: i32, xref: i32, x: f32, y: f32, w: f32, h: f32) -> Result<(), String> {
         let (tx, rx) = mpsc::channel();
         self.0.send(Pedido::Redimensionar { n, xref, x, y, w, h, resp: tx }).map_err(texto)?;
@@ -781,9 +825,9 @@ impl Motor {
         rx.recv().map_err(texto)?
     }
 
-    pub fn abrir_agregado(&self, ruta: String, archivo: Option<File>) -> Result<(usize, i32), String> {
+    pub fn abrir_agregado(&self, ruta: String, archivo: Option<File>, clave: Option<String>) -> Result<(usize, i32), String> {
         let (tx, rx) = mpsc::channel();
-        self.0.send(Pedido::AbrirAgregado { ruta, archivo, resp: tx }).map_err(texto)?;
+        self.0.send(Pedido::AbrirAgregado { ruta, archivo, clave, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
@@ -791,9 +835,9 @@ impl Motor {
         let _ = self.0.send(Pedido::CerrarAgregados);
     }
 
-    pub fn guardar(&self, destino: String, hojas: Option<Vec<Hoja>>) -> Result<(), String> {
+    pub fn guardar(&self, destino: String, hojas: Option<Vec<Hoja>>, proteccion: Option<String>) -> Result<(), String> {
         let (tx, rx) = mpsc::channel();
-        self.0.send(Pedido::Guardar { destino, hojas, resp: tx }).map_err(texto)?;
+        self.0.send(Pedido::Guardar { destino, hojas, proteccion, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
@@ -819,12 +863,26 @@ impl Motor {
     }
 }
 
-fn abrir_doc(ruta: &str) -> Result<(PdfDocument, Info), String> {
-    let t = Instant::now();
-    let doc = PdfDocument::open(ruta).map_err(|e| format!("No se pudo abrir este archivo: {e}"))?;
+/// Errores que la pantalla reconoce para pedir la contraseña (o pedirla otra vez).
+pub const PIDE_CLAVE: &str = "CLAVE:PIDE";
+pub const CLAVE_MAL: &str = "CLAVE:MAL";
+
+/// Abre un PDF; si tiene contraseña, la usa (o pide que se la den).
+pub(crate) fn abrir_pdf(ruta: &str, clave: Option<&str>) -> Result<PdfDocument, String> {
+    let mut doc = PdfDocument::open(ruta).map_err(|e| format!("No se pudo abrir este archivo: {e}"))?;
     if doc.needs_password().map_err(texto)? {
-        return Err("Este PDF tiene contraseña. Abrir PDFs con contraseña llegará en una próxima versión.".into());
+        match clave {
+            None => return Err(PIDE_CLAVE.into()),
+            Some(c) if !doc.authenticate(c).map_err(texto)? => return Err(CLAVE_MAL.into()),
+            Some(_) => {}
+        }
     }
+    Ok(doc)
+}
+
+fn abrir_doc(ruta: &str, clave: Option<&str>) -> Result<(PdfDocument, Info), String> {
+    let t = Instant::now();
+    let doc = abrir_pdf(ruta, clave)?;
     let paginas = doc.page_count().map_err(texto)?;
     if paginas < 1 {
         return Err("El documento no tiene páginas.".into());
@@ -837,6 +895,7 @@ fn abrir_doc(ruta: &str) -> Result<(PdfDocument, Info), String> {
         alto: b.height(),
         indice,
         ms: t.elapsed().as_millis(),
+        con_clave: clave.is_some() && doc.needs_password().unwrap_or(true),
         ruta: String::new(),
         nombre: String::new(),
     };

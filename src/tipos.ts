@@ -33,6 +33,8 @@ export type Info = {
   /** Para volver a abrirlo después: una ruta en Windows, un content:// en Android. */
   ruta: string
   nombre: string
+  /** Se abrió con contraseña: al guardarlo, la copia sigue pidiéndola. */
+  con_clave: boolean
 }
 export type Doc = { info: Info; id: number }
 export type Coincidencia = { pagina: number; x: number; y: number; w: number; h: number }

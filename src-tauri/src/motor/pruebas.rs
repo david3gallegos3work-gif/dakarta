@@ -203,7 +203,7 @@ fn lo_escrito_de_un_tiron_se_deshace_en_un_solo_paso() {
     let ruta = ruta.to_string_lossy().into_owned();
     guardar_doc(&doc_de(300.0, 400.0), &ruta).unwrap();
     let motor = Motor::nuevo();
-    motor.abrir(ruta.clone(), None).unwrap();
+    motor.abrir(ruta.clone(), None, None).unwrap();
     motor.anotar_caja(0, 0.1, 0.1, "Nota".into(), (0.0, 0.0, 0.0), 12.0, true).unwrap();
     let xref = motor.anotaciones(0).unwrap()[0].xref;
     let negro = Some((0.0, 0.0, 0.0));
@@ -288,7 +288,7 @@ fn organizar_mueve_gira_quita_y_duplica_sin_tocar_el_abierto() {
         Hoja { pagina: 1, giro: 0, archivo: ABIERTO },
         Hoja { pagina: 0, giro: -90, archivo: ABIERTO },
     ];
-    organizar_y_guardar(&doc, &hojas, &destino).unwrap();
+    organizar_y_guardar(&doc, &hojas, &destino, None).unwrap();
     assert_eq!(doc.page_count().unwrap(), 4, "el PDF abierto no cambia");
     assert!(!std::path::Path::new(&format!("{destino}.organizando")).exists());
 
@@ -311,8 +311,8 @@ fn organizar_mueve_gira_quita_y_duplica_sin_tocar_el_abierto() {
 #[test]
 fn organizar_rechaza_una_lista_vacia_o_con_paginas_que_no_existen() {
     let doc = doc_de(300.0, 400.0);
-    assert!(organizar_y_guardar(&doc, &[], "/tmp/no-se-usa.pdf").is_err());
-    assert!(organizar_y_guardar(&doc, &[Hoja { pagina: 5, giro: 0, archivo: ABIERTO }], "/tmp/no-se-usa.pdf").is_err());
+    assert!(organizar_y_guardar(&doc, &[], "/tmp/no-se-usa.pdf", None).is_err());
+    assert!(organizar_y_guardar(&doc, &[Hoja { pagina: 5, giro: 0, archivo: ABIERTO }], "/tmp/no-se-usa.pdf", None).is_err());
 }
 
 #[test]
@@ -321,7 +321,7 @@ fn duplicar_una_hoja_con_formulario_no_duplica_las_casillas() {
     let doc = PdfDocument::open(ruta).unwrap();
     let destino = std::env::temp_dir().join(format!("dakarta-dup-form-{}.pdf", std::process::id()));
     let destino = destino.to_string_lossy().into_owned();
-    organizar_y_guardar(&doc, &[Hoja { pagina: 0, giro: 0, archivo: ABIERTO }, Hoja { pagina: 0, giro: 0, archivo: ABIERTO }], &destino).unwrap();
+    organizar_y_guardar(&doc, &[Hoja { pagina: 0, giro: 0, archivo: ABIERTO }, Hoja { pagina: 0, giro: 0, archivo: ABIERTO }], &destino, None).unwrap();
     let mut nuevo = PdfDocument::open(&destino).unwrap();
     assert_eq!(nuevo.page_count().unwrap(), 2);
     assert!(nuevo.load_pdf_page(0).unwrap().widgets().count() > 0);
@@ -333,7 +333,10 @@ fn duplicar_una_hoja_con_formulario_no_duplica_las_casillas() {
 
 /// PDF de prueba en memoria con hojas que dicen «<prefijo> N».
 fn pdf_con_texto(prefijo: &str, n: usize) -> PdfDocument {
-    let ruta = std::env::temp_dir().join(format!("dakarta-{prefijo}-{}.pdf", std::process::id()));
+    // Nombre único: las pruebas corren a la vez y no deben pisarse el archivo.
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let k = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let ruta = std::env::temp_dir().join(format!("dakarta-{prefijo}-{}-{k}.pdf", std::process::id()));
     std::fs::write(&ruta, pdf_numerado(n).replace("(hoja ", &format!("({prefijo} "))).unwrap();
     let doc = PdfDocument::open(ruta.to_str().unwrap()).unwrap();
     std::fs::remove_file(&ruta).unwrap();
@@ -360,7 +363,7 @@ fn unir_intercala_hojas_de_dos_pdfs_con_sus_notas() {
         Hoja { pagina: 2, giro: 0, archivo: 0 },
         Hoja { pagina: 0, giro: 0, archivo: ABIERTO },
     ];
-    unir_y_guardar(Some(&a), &[&b], &hojas, &destino).unwrap();
+    unir_y_guardar(Some((&a, None)), &[(&b, None)], &hojas, &destino).unwrap();
     assert_eq!((a.page_count().unwrap(), b.page_count().unwrap()), (2, 3), "los originales no cambian");
     assert!(!std::path::Path::new(&format!("{destino}.uniendo")).exists());
     let u = PdfDocument::open(&destino).unwrap();
@@ -379,7 +382,7 @@ fn unir_sin_pdf_abierto_y_con_formulario_agregado() {
     let destino = std::env::temp_dir().join(format!("dakarta-unido2-{}.pdf", std::process::id()));
     let destino = destino.to_string_lossy().into_owned();
     let hojas = [Hoja { pagina: 1, giro: 0, archivo: 0 }, Hoja { pagina: 0, giro: 0, archivo: 1 }];
-    unir_y_guardar(None, &[&b, &form], &hojas, &destino).unwrap();
+    unir_y_guardar(None, &[(&b, None), (&form, None)], &hojas, &destino).unwrap();
     let u = PdfDocument::open(&destino).unwrap();
     assert_eq!(u.page_count().unwrap(), 2);
     assert_eq!(textos(&u)[0], "b 2");
@@ -387,6 +390,85 @@ fn unir_sin_pdf_abierto_y_con_formulario_agregado() {
     // Las casillas del segundo PDF no se copian (serían campos sueltos que no se llenan).
     assert_eq!(u.load_pdf_page(1).unwrap().widgets().count(), 0);
     // Sin PDF abierto, pedir una hoja «del abierto» es un error claro.
-    assert!(unir_y_guardar(None, &[&b], &[Hoja { pagina: 0, giro: 0, archivo: ABIERTO }], &destino).is_err());
+    assert!(unir_y_guardar(None, &[(&b, None)], &[Hoja { pagina: 0, giro: 0, archivo: ABIERTO }], &destino).is_err());
     std::fs::remove_file(&destino).unwrap();
+}
+
+#[test]
+fn girar_texto_en_pasos_de_90_sigue_siendo_texto_y_se_deshace() {
+    let mut doc = doc_de(300.0, 400.0);
+    let t = anotar_caja(&mut doc, 0, 0.3, 0.3, "Texto girado", (0.0, 0.0, 0.0), 14.0, true).unwrap();
+    let antes = datos_de(&doc, 0, t).unwrap();
+    // 80° con el dedo se redondea a 90°: el cuadro queda de lado, con el texto intacto.
+    girar_anotacion(&mut doc, 0, t, 80.0).unwrap();
+    let d = datos_de(&doc, 0, t).unwrap();
+    assert_eq!(d.giro, 270, "/Rotate gira contra el reloj: 90° con el reloj es 270");
+    assert!((d.rect.width() - antes.rect.height()).abs() < 0.5 && (d.rect.height() - antes.rect.width()).abs() < 0.5);
+    assert_eq!(d.contenido, "Texto girado");
+    // Cambiar el texto de un cuadro girado lo deja girado y a la medida.
+    editar_anotacion(&mut doc, 0, t, Some("Otro texto más largo"), None, None).unwrap();
+    let e = datos_de(&doc, 0, t).unwrap();
+    assert_eq!(e.giro, 270);
+    assert!(e.rect.height() > e.rect.width());
+    let mut hechas = vec![Hecho::Cambio { n: 0, xref: t, antes: antes.clone() }];
+    deshacer(&mut doc, &mut hechas).unwrap();
+    assert_eq!(datos_de(&doc, 0, t).unwrap().giro, 0);
+    // Un giro pequeño (menos de 45°) no cambia un texto.
+    girar_anotacion(&mut doc, 0, t, 30.0).unwrap();
+    assert_eq!(datos_de(&doc, 0, t).unwrap().giro, 0);
+}
+
+#[test]
+fn girar_lapiz_a_cualquier_angulo_sin_salirse_de_la_hoja() {
+    let mut doc = doc_de(300.0, 400.0);
+    let k = anotar_tinta(&mut doc, 0, (0.8, 0.0, 0.0), 3.0, &[vec![(0.1, 0.5), (0.9, 0.5)]]).unwrap();
+    girar_anotacion(&mut doc, 0, k, 90.0).unwrap();
+    let d = datos_de(&doc, 0, k).unwrap();
+    // La raya horizontal de 240 puntos queda vertical, y entera dentro de la hoja.
+    assert!(d.rect.height() > 230.0 && d.rect.width() < 15.0, "{:?}", d.rect);
+    assert!(d.rect.y0 >= 0.0 && d.rect.y1 <= 400.0);
+    let h = anotar_texto(&mut doc, 0, TipoTexto::Resaltar, (1.0, 1.0, 0.0), (0.1, 0.1), (0.2, 0.2));
+    if let Ok(x) = h {
+        assert!(girar_anotacion(&mut doc, 0, x, 90.0).is_err(), "el resaltado sigue al texto: no se gira");
+    }
+}
+
+#[test]
+fn un_pdf_con_contrasena_se_abre_con_ella_y_la_conserva_al_organizar() {
+    let carpeta = std::env::temp_dir().join(format!("dakarta-clave-{}", std::process::id()));
+    std::fs::create_dir_all(&carpeta).unwrap();
+    let ruta = |n: &str| carpeta.join(n).to_string_lossy().into_owned();
+    let original = PdfDocument::open(concat!(env!("CARGO_MANIFEST_DIR"), "/pruebas/formulario.pdf")).unwrap();
+    // Proteger: copia cifrada con la contraseña.
+    guardar_doc_con(&original, &ruta("protegido.pdf"), &Proteccion::de("Ñandú-2026").unwrap()).unwrap();
+    assert_eq!(abrir_pdf(&ruta("protegido.pdf"), None).err().unwrap(), PIDE_CLAVE);
+    assert_eq!(abrir_pdf(&ruta("protegido.pdf"), Some("otra")).err().unwrap(), CLAVE_MAL);
+    let (doc, info) = abrir_doc(&ruta("protegido.pdf"), Some("Ñandú-2026")).unwrap();
+    assert!(info.con_clave);
+    assert_eq!(doc.page_count().unwrap(), 1);
+    // Guardar copia u organizar un PDF con contraseña: la copia sigue con la misma contraseña.
+    guardar_doc(&doc, &ruta("copia.pdf")).unwrap();
+    assert_eq!(abrir_pdf(&ruta("copia.pdf"), None).err().unwrap(), PIDE_CLAVE);
+    organizar_y_guardar(&doc, &[Hoja { pagina: 0, giro: 90, archivo: ABIERTO }], &ruta("organizado.pdf"), Some("Ñandú-2026")).unwrap();
+    assert!(abrir_pdf(&ruta("organizado.pdf"), Some("Ñandú-2026")).is_ok());
+    assert_eq!(abrir_pdf(&ruta("organizado.pdf"), None).err().unwrap(), PIDE_CLAVE);
+    // Cambiar la contraseña: la nueva abre la copia y la vieja ya no.
+    guardar_doc_con(&doc, &ruta("cambiada.pdf"), &Proteccion::de("nueva").unwrap()).unwrap();
+    assert!(abrir_pdf(&ruta("cambiada.pdf"), Some("nueva")).is_ok());
+    assert_eq!(abrir_pdf(&ruta("cambiada.pdf"), Some("Ñandú-2026")).err().unwrap(), CLAVE_MAL);
+    // Unir un PDF con contraseña con otro: el unido lleva la del primero y las hojas de los dos.
+    let otro = abrir_pdf(&ruta("cambiada.pdf"), Some("nueva")).unwrap();
+    let hojas = [Hoja { pagina: 0, giro: 0, archivo: ABIERTO }, Hoja { pagina: 0, giro: 0, archivo: 0 }];
+    // (MuPDF le deja al abierto la contraseña nueva: el motor la recuerda.)
+    unir_y_guardar(Some((&doc, Some("nueva"))), &[(&otro, Some("nueva"))], &hojas, &ruta("unido.pdf")).unwrap();
+    assert_eq!(abrir_pdf(&ruta("unido.pdf"), Some("nueva")).unwrap().page_count().unwrap(), 2);
+    assert_eq!(abrir_pdf(&ruta("unido.pdf"), None).err().unwrap(), PIDE_CLAVE);
+    // Quitar la contraseña: la copia se abre sin pedirla.
+    guardar_doc_con(&doc, &ruta("sin-clave.pdf"), &Proteccion::de("").unwrap()).unwrap();
+    let (_, info) = abrir_doc(&ruta("sin-clave.pdf"), None).unwrap();
+    assert!(!info.con_clave);
+    // Un PDF sin contraseña no pide nada aunque se mande una.
+    assert!(!abrir_doc(&ruta("sin-clave.pdf"), Some("x")).unwrap().1.con_clave);
+    assert!(Proteccion::de(&"x".repeat(200)).is_err());
+    std::fs::remove_dir_all(&carpeta).unwrap();
 }

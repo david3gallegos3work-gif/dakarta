@@ -1,8 +1,8 @@
 # Nota de traspaso
 
-**Fecha y lugar:** 2026-11-03 22:20, en la PC. Actualizada el 2026-11-04 (Ecuador) desde la nube.
+**Fecha y lugar:** 2026-11-03 22:20, en la PC. Actualizada el 2026-11-05 (Ecuador) desde la nube.
 **IA y aparato:** Claude Code. Revisión en la PC; arreglos en la nube.
-**Rama:** `main` (versión 0.4.5).
+**Rama:** `main` (versión 0.4.7).
 
 ## Hecho en la nube (2026-11-03 y 2026-11-04)
 
@@ -28,6 +28,9 @@
 - 0.4.3: lector de Word propio (`motor/word.rs`, con `zip` y `roxmltree`): tamaño de hoja y márgenes del documento, alineación, negritas/cursivas/subrayado/color, viñetas y listas numeradas, tablas con columnas (bordes si los tiene), saltos de página (como capítulos de un EPUB en memoria). Panel ☰: últimos archivos también por tipo. Pendiente: imágenes dentro del Word, encabezados/pies, cuadros de texto; Excel y PowerPoint con la misma idea.
 - 0.4.4: David descartó la Fase 4. Se quitó todo lo de otros formatos (lector de Word, lectores extra de MuPDF, `zip`/`roxmltree`, tipos de archivo, «Abrir con» de otros formatos, archivos de prueba) y la separación de últimos por tipo. Se quedan: reabrir sin alternar y nombres limpios.
 - 0.4.5: unir PDFs (lo que faltaba de la Fase 3). Inicio → «Unir PDFs» o panel ☰ → «Unir con otros PDFs». El motor abre los agregados (`abrir_agregado`/`cerrar_agregados`), pinta sus miniaturas (`?a=N`) y une con `unir_y_guardar`. En Android el PDF elegido llega por `pendiente()` y se desvía a la pantalla de unir. Pruebas: 23 del motor, 19 de la pantalla.
+- 0.4.6: girar anotaciones con un círculo arriba de la elegida (en «Mover»). Lápiz y firma, a cualquier ángulo (se giran los puntos); texto, nota y sello, en pasos de 90° con /Rotate (siguen siendo texto editable; David eligió esta opción). `girar_anotacion` en `motor/anotar.rs`, con deshacer. Pruebas: 25 del motor.
+- David probó girar, unir, organizar y las manijas: todo bien. Siguiente en su orden: contraseña (hecho), crear PDF desde fotos/cámara, comprimir, Gemini (Fase 5), resto de la Fase 6. Lo de Word queda descartado.
+- 0.4.7: PDF con contraseña. Al abrir uno protegido sale un cuadro para escribirla (si no sirve, «Esa contraseña no es»); vale para «Abrir», últimos archivos, «Abrir con» y unir. Panel ☰: «Proteger con contraseña» (o «Cambiar la contraseña») guarda una copia AES-256 con la contraseña escrita dos veces; «Quitar la contraseña» guarda una copia sin ella; en ambos se sigue en la copia. Guardar, organizar o unir uno con contraseña la conserva. Motor: `abrir_pdf` (errores `CLAVE:PIDE` / `CLAVE:MAL`), `Proteccion` y `guardar_doc_con` en `motor/pintar.rs`; `elegir_pdf` ahora devuelve la ruta y `elegir_pdfs` las de unir. Ojo: al guardar con una contraseña nueva, MuPDF se la deja también al PDF abierto (el motor la recuerda). Pruebas: 26 del motor, 21 de la pantalla. Por comprobar en el celular.
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo
