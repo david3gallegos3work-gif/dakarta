@@ -380,3 +380,26 @@ fn un_word_antiguo_da_un_mensaje_claro() {
     assert!(e.contains("Office antiguo"), "{e}");
     std::fs::remove_file(&ruta).unwrap();
 }
+
+#[test]
+fn un_word_conserva_hoja_fecha_vinetas_tabla_y_saltos() {
+    // Carta de prueba con datos inventados: tamaño Carta, fecha a la derecha, viñetas en negrita,
+    // lista numerada, tabla de firmas y un salto de página antes del último título.
+    let (d, info) = abrir_doc(&prueba("carta.docx"), "carta.docx").unwrap();
+    assert!(!info.pdf);
+    assert_eq!((info.ancho.round(), info.alto.round()), (612.0, 792.0));
+    assert_eq!(info.paginas, 3);
+    let texto = |n: i32| d.doc().load_page(n).unwrap().text(TextExtractOptions::default()).unwrap();
+    let primera = texto(0);
+    for buscado in ["Ibarra, 15 de abril de 2026", "• Representación Administrativa:", "1. Revisar el acta.", "3. Entregar", "Cédula"] {
+        assert!(primera.contains(buscado), "falta «{buscado}» en:\n{primera}");
+    }
+    assert!(texto(2).contains("Segunda página"), "el salto de página no creó hoja nueva");
+}
+
+#[test]
+fn un_word_sin_saltos_va_como_una_sola_pagina_web() {
+    let w = word::convertir(&std::fs::read(prueba("documento.docx")).unwrap()).unwrap();
+    assert_eq!(w.tipo, "html");
+    assert!(String::from_utf8(w.datos).unwrap().contains("Informe de prueba para Dakarta"));
+}
