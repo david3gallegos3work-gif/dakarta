@@ -2,7 +2,7 @@
 
 **Fecha y lugar:** 2026-11-03 22:20, en la PC. Actualizada el 2026-11-04 (Ecuador) desde la nube.
 **IA y aparato:** Claude Code. Revisión en la PC; arreglos en la nube.
-**Rama:** `main` (versión 0.4.5).
+**Rama:** `main` (versión 0.4.6).
 
 ## Hecho en la nube (2026-11-03 y 2026-11-04)
 
@@ -28,6 +28,7 @@
 - 0.4.3: lector de Word propio (`motor/word.rs`, con `zip` y `roxmltree`): tamaño de hoja y márgenes del documento, alineación, negritas/cursivas/subrayado/color, viñetas y listas numeradas, tablas con columnas (bordes si los tiene), saltos de página (como capítulos de un EPUB en memoria). Panel ☰: últimos archivos también por tipo. Pendiente: imágenes dentro del Word, encabezados/pies, cuadros de texto; Excel y PowerPoint con la misma idea.
 - 0.4.4: David descartó la Fase 4. Se quitó todo lo de otros formatos (lector de Word, lectores extra de MuPDF, `zip`/`roxmltree`, tipos de archivo, «Abrir con» de otros formatos, archivos de prueba) y la separación de últimos por tipo. Se quedan: reabrir sin alternar y nombres limpios.
 - 0.4.5: unir PDFs (lo que faltaba de la Fase 3). Inicio → «Unir PDFs» o panel ☰ → «Unir con otros PDFs». El motor abre los agregados (`abrir_agregado`/`cerrar_agregados`), pinta sus miniaturas (`?a=N`) y une con `unir_y_guardar`. En Android el PDF elegido llega por `pendiente()` y se desvía a la pantalla de unir. Pruebas: 23 del motor, 19 de la pantalla.
+- 0.4.6: girar anotaciones con un círculo arriba de la elegida (en «Mover»). Lápiz y firma, a cualquier ángulo (se giran los puntos); texto, nota y sello, en pasos de 90° con /Rotate (siguen siendo texto editable; David eligió esta opción). `girar_anotacion` en `motor/anotar.rs`, con deshacer. Pruebas: 25 del motor.
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo

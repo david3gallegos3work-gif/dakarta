@@ -142,6 +142,11 @@ async fn editar_anotacion(
 }
 
 #[tauri::command]
+async fn girar_anotacion(motor: State<'_, Motor>, pagina: i32, xref: i32, grados: f32) -> Result<(), String> {
+    motor.girar_anotacion(pagina, xref, grados)
+}
+
+#[tauri::command]
 async fn redimensionar_anotacion(
     motor: State<'_, Motor>,
     pagina: i32,
@@ -339,6 +344,7 @@ pub fn run() {
     mover_anotacion,
     editar_anotacion,
     redimensionar_anotacion,
+    girar_anotacion,
     borrar_anotacion,
     campos,
     poner_campo,

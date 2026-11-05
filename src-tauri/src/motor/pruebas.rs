@@ -390,3 +390,42 @@ fn unir_sin_pdf_abierto_y_con_formulario_agregado() {
     assert!(unir_y_guardar(None, &[&b], &[Hoja { pagina: 0, giro: 0, archivo: ABIERTO }], &destino).is_err());
     std::fs::remove_file(&destino).unwrap();
 }
+
+#[test]
+fn girar_texto_en_pasos_de_90_sigue_siendo_texto_y_se_deshace() {
+    let mut doc = doc_de(300.0, 400.0);
+    let t = anotar_caja(&mut doc, 0, 0.3, 0.3, "Texto girado", (0.0, 0.0, 0.0), 14.0, true).unwrap();
+    let antes = datos_de(&doc, 0, t).unwrap();
+    // 80° con el dedo se redondea a 90°: el cuadro queda de lado, con el texto intacto.
+    girar_anotacion(&mut doc, 0, t, 80.0).unwrap();
+    let d = datos_de(&doc, 0, t).unwrap();
+    assert_eq!(d.giro, 270, "/Rotate gira contra el reloj: 90° con el reloj es 270");
+    assert!((d.rect.width() - antes.rect.height()).abs() < 0.5 && (d.rect.height() - antes.rect.width()).abs() < 0.5);
+    assert_eq!(d.contenido, "Texto girado");
+    // Cambiar el texto de un cuadro girado lo deja girado y a la medida.
+    editar_anotacion(&mut doc, 0, t, Some("Otro texto más largo"), None, None).unwrap();
+    let e = datos_de(&doc, 0, t).unwrap();
+    assert_eq!(e.giro, 270);
+    assert!(e.rect.height() > e.rect.width());
+    let mut hechas = vec![Hecho::Cambio { n: 0, xref: t, antes: antes.clone() }];
+    deshacer(&mut doc, &mut hechas).unwrap();
+    assert_eq!(datos_de(&doc, 0, t).unwrap().giro, 0);
+    // Un giro pequeño (menos de 45°) no cambia un texto.
+    girar_anotacion(&mut doc, 0, t, 30.0).unwrap();
+    assert_eq!(datos_de(&doc, 0, t).unwrap().giro, 0);
+}
+
+#[test]
+fn girar_lapiz_a_cualquier_angulo_sin_salirse_de_la_hoja() {
+    let mut doc = doc_de(300.0, 400.0);
+    let k = anotar_tinta(&mut doc, 0, (0.8, 0.0, 0.0), 3.0, &[vec![(0.1, 0.5), (0.9, 0.5)]]).unwrap();
+    girar_anotacion(&mut doc, 0, k, 90.0).unwrap();
+    let d = datos_de(&doc, 0, k).unwrap();
+    // La raya horizontal de 240 puntos queda vertical, y entera dentro de la hoja.
+    assert!(d.rect.height() > 230.0 && d.rect.width() < 15.0, "{:?}", d.rect);
+    assert!(d.rect.y0 >= 0.0 && d.rect.y1 <= 400.0);
+    let h = anotar_texto(&mut doc, 0, TipoTexto::Resaltar, (1.0, 1.0, 0.0), (0.1, 0.1), (0.2, 0.2));
+    if let Ok(x) = h {
+        assert!(girar_anotacion(&mut doc, 0, x, 90.0).is_err(), "el resaltado sigue al texto: no se gira");
+    }
+}
