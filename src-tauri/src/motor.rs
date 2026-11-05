@@ -588,16 +588,9 @@ impl Motor {
                                 // Organizar no cambia el PDF abierto: sus cambios siguen pudiendo deshacerse.
                                 Some((doc, _)) => match (&hojas, proteccion) {
                                     (Some(h), _) => organizar_y_guardar(doc, h, &destino, clave_abierta.as_deref()),
-                                    // Poner o quitar la contraseña: una copia aparte. MuPDF le deja al abierto la
-                                    // contraseña nueva (sus siguientes copias la llevan): se recuerda la nueva.
-                                    (None, Some(p)) => Proteccion::de(&p).and_then(|p| {
-                                        guardar_doc_con(doc, &destino, &p)?;
-                                        clave_abierta = match p {
-                                            Proteccion::Poner(c) => Some(c),
-                                            _ => None,
-                                        };
-                                        Ok(())
-                                    }),
+                                    // Poner o quitar la contraseña: una copia aparte; el PDF abierto sigue igual.
+                                    (None, Some(p)) => Proteccion::de(&p)
+                                        .and_then(|p| guardar_doc_con(doc, &destino, &p, clave_abierta.as_deref())),
                                     (None, None) => guardar_doc(doc, &destino).map(|()| hechas.clear()),
                                 },
                             };
@@ -869,20 +862,28 @@ pub const CLAVE_MAL: &str = "CLAVE:MAL";
 
 /// Abre un PDF; si tiene contraseña, la usa (o pide que se la den).
 pub(crate) fn abrir_pdf(ruta: &str, clave: Option<&str>) -> Result<PdfDocument, String> {
+    abrir_pdf_y_ver(ruta, clave).map(|(doc, _)| doc)
+}
+
+/// Como `abrir_pdf`, y dice si hizo falta la contraseña. Ojo: no se le vuelve a preguntar a MuPDF
+/// `needs_password` después de dar la contraseña: lo comprueba probando la contraseña vacía, y con eso
+/// olvida la buena (el PDF sigue abierto pero se lee mal y las hojas salen en blanco).
+fn abrir_pdf_y_ver(ruta: &str, clave: Option<&str>) -> Result<(PdfDocument, bool), String> {
     let mut doc = PdfDocument::open(ruta).map_err(|e| format!("No se pudo abrir este archivo: {e}"))?;
-    if doc.needs_password().map_err(texto)? {
+    let pide = doc.needs_password().map_err(texto)?;
+    if pide {
         match clave {
             None => return Err(PIDE_CLAVE.into()),
             Some(c) if !doc.authenticate(c).map_err(texto)? => return Err(CLAVE_MAL.into()),
             Some(_) => {}
         }
     }
-    Ok(doc)
+    Ok((doc, pide))
 }
 
 fn abrir_doc(ruta: &str, clave: Option<&str>) -> Result<(PdfDocument, Info), String> {
     let t = Instant::now();
-    let doc = abrir_pdf(ruta, clave)?;
+    let (doc, con_clave) = abrir_pdf_y_ver(ruta, clave)?;
     let paginas = doc.page_count().map_err(texto)?;
     if paginas < 1 {
         return Err("El documento no tiene páginas.".into());
@@ -895,7 +896,7 @@ fn abrir_doc(ruta: &str, clave: Option<&str>) -> Result<(PdfDocument, Info), Str
         alto: b.height(),
         indice,
         ms: t.elapsed().as_millis(),
-        con_clave: clave.is_some() && doc.needs_password().unwrap_or(true),
+        con_clave,
         ruta: String::new(),
         nombre: String::new(),
     };

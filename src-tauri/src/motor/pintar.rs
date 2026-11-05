@@ -5,7 +5,7 @@ use super::*;
 /// Se escribe primero a un archivo aparte y solo al terminar reemplaza al destino:
 /// si algo falla a medias, el archivo que ya existía queda intacto.
 pub(super) fn guardar_doc(doc: &PdfDocument, destino: &str) -> Result<(), String> {
-    guardar_doc_con(doc, destino, &Proteccion::Igual)
+    escribir(doc, destino, &Proteccion::Igual)
 }
 
 /// La contraseña de la copia: la misma del original (o ninguna si no tenía), una nueva o ninguna.
@@ -29,7 +29,22 @@ impl Proteccion {
     }
 }
 
-pub(super) fn guardar_doc_con(doc: &PdfDocument, destino: &str, proteccion: &Proteccion) -> Result<(), String> {
+/// `clave`: la contraseña con que se abrió `doc` (si tenía). Poner o quitar la contraseña se hace sobre
+/// una copia temporal: MuPDF, al guardar con otro cifrado, se lo deja también al documento que guarda, y
+/// el abierto no debe cambiar.
+pub(super) fn guardar_doc_con(doc: &PdfDocument, destino: &str, proteccion: &Proteccion, clave: Option<&str>) -> Result<(), String> {
+    if matches!(proteccion, Proteccion::Igual) {
+        return escribir(doc, destino, proteccion);
+    }
+    let temporal = format!("{destino}.protegiendo");
+    let r = escribir(doc, &temporal, &Proteccion::Igual)
+        .and_then(|()| abrir_pdf(&temporal, clave))
+        .and_then(|copia| escribir(&copia, destino, proteccion));
+    let _ = std::fs::remove_file(&temporal);
+    r
+}
+
+fn escribir(doc: &PdfDocument, destino: &str, proteccion: &Proteccion) -> Result<(), String> {
     let mut opciones = PdfWriteOptions::default();
     opciones.set_compress(true);
     match proteccion {
