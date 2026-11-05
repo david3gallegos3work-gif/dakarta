@@ -2,7 +2,7 @@
 
 **Fecha y lugar:** 2026-11-03 22:20, en la PC. Actualizada el 2026-11-05 (Ecuador) desde la nube.
 **IA y aparato:** Claude Code. Revisión en la PC; arreglos en la nube.
-**Rama:** `main` (versión 0.4.8).
+**Rama:** `main` (versión 0.4.9).
 
 ## Hecho en la nube (2026-11-03 y 2026-11-04)
 
@@ -32,6 +32,8 @@
 - David probó girar, unir, organizar y las manijas: todo bien. Siguiente en su orden: contraseña (hecho), crear PDF desde fotos/cámara, comprimir, Gemini (Fase 5), resto de la Fase 6. Lo de Word queda descartado.
 - 0.4.7: PDF con contraseña. Al abrir uno protegido sale un cuadro para escribirla (si no sirve, «Esa contraseña no es»); vale para «Abrir», últimos archivos, «Abrir con» y unir. Panel ☰: «Proteger con contraseña» (o «Cambiar la contraseña») guarda una copia AES-256 con la contraseña escrita dos veces; «Quitar la contraseña» guarda una copia sin ella; en ambos se sigue en la copia. Guardar, organizar o unir uno con contraseña la conserva. Motor: `abrir_pdf` (errores `CLAVE:PIDE` / `CLAVE:MAL`), `Proteccion` y `guardar_doc_con` en `motor/pintar.rs`; `elegir_pdf` ahora devuelve la ruta y `elegir_pdfs` las de unir. Ojo: al guardar con una contraseña nueva, MuPDF se la deja también al PDF abierto (el motor la recuerda). Pruebas: 26 del motor, 21 de la pantalla. Por comprobar en el celular.
 - 0.4.8: David probó la 0.4.7: el PDF protegido abría con la contraseña pero con las hojas en blanco. Causa: tras dar la contraseña se volvía a llamar `needs_password` (para `con_clave`), y MuPDF lo comprueba probando la contraseña vacía, con lo que olvida la buena. Ahora `abrir_pdf_y_ver` lo mira una sola vez, antes de autenticar. Además, poner o quitar la contraseña se hace desde una copia temporal: MuPDF le cambiaba el cifrado también al PDF abierto. Pruebas: 27 del motor (una nueva comprueba que el protegido se lee entero).
+- David probó la 0.4.8: contraseña bien.
+- 0.4.9: crear PDF desde fotos (inicio y panel ☰). Usa la pantalla de organizar en modo `fotos` (marcar, mover, girar, duplicar, quitar, deshacer): «+ Fotos» (galería, varias) y, en Android, «Cámara» (`<input capture>`, que wry abre con la cámara del sistema; `parchar-android.py` agrega `<queries>` de IMAGE_CAPTURE para Android 11+). La pantalla endereza, gira y achica cada foto (lado máximo 2400 px, JPEG 85 %, `src/fotos.ts`) y las manda como bytes (`fotos_agregar`); el motor arma el PDF (`motor/fotos.rs`): «Hoja A4» (por omisión, la foto centrada con margen; A4 de lado si la foto es apaisada) o la hoja con la forma de la foto. Luego se guarda donde se elija y se abre. Pruebas: 28 del motor, 24 de la pantalla. Por comprobar en el celular: la cámara, fotos HEIC (si no se leen, avisa).
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo
