@@ -41,6 +41,8 @@ pub struct Info {
     alto: f32,
     indice: Vec<Entrada>,
     ms: u128,
+    /// Solo un PDF se puede anotar, organizar y guardar; los demás formatos son para leer.
+    pdf: bool,
     /// Para volver a abrirlo después (ruta en Windows, content:// en Android).
     ruta: String,
     nombre: String,
@@ -230,7 +232,8 @@ impl Hecho {
 }
 
 enum Pedido {
-    Abrir { ruta: String, archivo: Option<File>, resp: Sender<Result<Info, String>> },
+    /// `nombre` ayuda a saber qué tipo de archivo es cuando la ruta no lo dice (Android).
+    Abrir { ruta: String, nombre: String, archivo: Option<File>, resp: Sender<Result<Info, String>> },
     Buscar { texto: String, resp: Sender<Result<Busqueda, String>> },
     CancelarBusqueda,
     Pagina(PedidoPagina),
@@ -301,6 +304,38 @@ enum Pedido {
 }
 
 /// MuPDF no se comparte entre hilos: un solo hilo guarda el documento y atiende los pedidos.
+/// El documento abierto: un PDF (se puede anotar, organizar y guardar) u otro formato que MuPDF
+/// sabe leer (Word, EPUB, TXT, imágenes…), solo para leer, buscar y copiar texto.
+enum Abierto {
+    Pdf(PdfDocument),
+    Otro(Document),
+}
+
+impl Abierto {
+    fn doc(&self) -> &Document {
+        match self {
+            Abierto::Pdf(d) => d,
+            Abierto::Otro(d) => d,
+        }
+    }
+
+    fn pdf(&self) -> Result<&PdfDocument, String> {
+        match self {
+            Abierto::Pdf(d) => Ok(d),
+            Abierto::Otro(_) => Err(SOLO_PDF.into()),
+        }
+    }
+
+    fn pdf_mut(&mut self) -> Result<&mut PdfDocument, String> {
+        match self {
+            Abierto::Pdf(d) => Ok(d),
+            Abierto::Otro(_) => Err(SOLO_PDF.into()),
+        }
+    }
+}
+
+const SOLO_PDF: &str = "Esto solo se puede hacer en un PDF.";
+
 pub struct Motor(Sender<Pedido>);
 
 impl Motor {
@@ -308,7 +343,7 @@ impl Motor {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             // En Android el archivo viaja con el documento: si se cerrara, MuPDF perdería el acceso.
-            let mut abierto: Option<(PdfDocument, Option<File>)> = None;
+            let mut abierto: Option<(Abierto, Option<File>)> = None;
             let mut ruta_abierta = String::new();
             // Anotaciones y campos cambiados en esta sesión, para deshacer.
             let mut hechas: Vec<Hecho> = Vec::new();
@@ -327,11 +362,11 @@ impl Motor {
                 };
                 for pedido in primero.into_iter().chain(rx.try_iter()) {
                     match pedido {
-                        Pedido::Abrir { ruta, archivo, resp } => {
+                        Pedido::Abrir { ruta, nombre, archivo, resp } => {
                             if let Some(b) = busqueda.take() {
                                 b.cancelar();
                             }
-                            let r = abrir_doc(&ruta).map(|(doc, info)| {
+                            let r = abrir_doc(&ruta, &nombre).map(|(doc, info)| {
                                 abierto = Some((doc, archivo));
                                 ruta_abierta = ruta;
                                 hechas.clear();
@@ -363,68 +398,69 @@ impl Motor {
                         Pedido::Texto { n, tipo, color, a, b, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => anotar_texto(doc, n, tipo, color, a, b).map(|xref| {
+                                Some((d, _)) => d.pdf_mut().and_then(|doc| anotar_texto(doc, n, tipo, color, a, b).map(|xref| {
                                     hechas.push(Hecho::Anotacion { n, xref });
                                     cache.olvidar_pagina(n);
-                                }),
+                                })),
                             };
                             let _ = resp.send(r);
                         }
                         Pedido::Tinta { n, color, grosor, trazos, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => anotar_tinta(doc, n, color, grosor, &trazos).map(|xref| {
+                                Some((d, _)) => d.pdf_mut().and_then(|doc| anotar_tinta(doc, n, color, grosor, &trazos).map(|xref| {
                                     hechas.push(Hecho::Anotacion { n, xref });
                                     cache.olvidar_pagina(n);
-                                }),
+                                })),
                             };
                             let _ = resp.send(r);
                         }
                         Pedido::Caja { n, x, y, contenido, color, tamano, postit, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => anotar_caja(doc, n, x, y, &contenido, color, tamano, postit).map(|xref| {
+                                Some((d, _)) => d.pdf_mut().and_then(|doc| anotar_caja(doc, n, x, y, &contenido, color, tamano, postit).map(|xref| {
                                     hechas.push(Hecho::Anotacion { n, xref });
                                     cache.olvidar_pagina(n);
-                                }),
+                                })),
                             };
                             let _ = resp.send(r);
                         }
                         Pedido::Sello { n, x, y, texto, color, tamano, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => anotar_sello(doc, n, x, y, &texto, color, tamano).map(|xref| {
+                                Some((d, _)) => d.pdf_mut().and_then(|doc| anotar_sello(doc, n, x, y, &texto, color, tamano).map(|xref| {
                                     hechas.push(Hecho::Anotacion { n, xref });
                                     cache.olvidar_pagina(n);
-                                }),
+                                })),
                             };
                             let _ = resp.send(r);
                         }
                         Pedido::Anotaciones { n, resp } => {
                             let r = match &abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => anotaciones_de(doc, n),
+                                // Fuera de PDF no hay anotaciones ni formularios: lista vacía.
+                                Some((d, _)) => d.pdf().map_or_else(|_| Ok(Vec::new()), |doc| anotaciones_de(doc, n)),
                             };
                             let _ = resp.send(r);
                         }
                         Pedido::Palabras { n, resp } => {
                             let r = match &abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => palabras_de(doc, n),
+                                Some((d, _)) => palabras_de(d.doc(), n),
                             };
                             let _ = resp.send(r);
                         }
                         Pedido::Enlaces { n, resp } => {
                             let r = match &abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => enlaces_de(doc, n),
+                                Some((d, _)) => enlaces_de(d.doc(), n),
                             };
                             let _ = resp.send(r);
                         }
                         Pedido::Mover { n, xref, dx, dy, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => datos_de(doc, n, xref).and_then(|antes| {
+                                Some((d, _)) => d.pdf_mut().and_then(|doc| datos_de(doc, n, xref).and_then(|antes| {
                                     mover_anotacion(doc, n, xref, dx, dy).map(|nuevo| {
                                         for h in hechas.iter_mut() {
                                             h.cambiar_xref(xref, nuevo);
@@ -432,14 +468,14 @@ impl Motor {
                                         hechas.push(Hecho::Cambio { n, xref: nuevo, antes });
                                         cache.olvidar_pagina(n);
                                     })
-                                }),
+                                })),
                             };
                             let _ = resp.send(r);
                         }
                         Pedido::Editar { n, xref, contenido, color, tamano, junto, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => datos_de(doc, n, xref).and_then(|antes| {
+                                Some((d, _)) => d.pdf_mut().and_then(|doc| datos_de(doc, n, xref).and_then(|antes| {
                                     editar_anotacion(doc, n, xref, contenido.as_deref(), color, tamano).map(|nuevo| {
                                         for h in hechas.iter_mut() {
                                             h.cambiar_xref(xref, nuevo);
@@ -453,72 +489,73 @@ impl Motor {
                                         }
                                         !sigue
                                     })
-                                }),
+                                })),
                             };
                             let _ = resp.send(r);
                         }
                         Pedido::Redimensionar { n, xref, x, y, w, h, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => datos_de(doc, n, xref).and_then(|antes| {
+                                Some((d, _)) => d.pdf_mut().and_then(|doc| datos_de(doc, n, xref).and_then(|antes| {
                                     redimensionar_anotacion(doc, n, xref, x, y, w, h).map(|()| {
                                         hechas.push(Hecho::Cambio { n, xref, antes });
                                         cache.olvidar_pagina(n);
                                     })
-                                }),
+                                })),
                             };
                             let _ = resp.send(r);
                         }
                         Pedido::Borrar { n, xref, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => datos_de(doc, n, xref).and_then(|datos| {
+                                Some((d, _)) => d.pdf_mut().and_then(|doc| datos_de(doc, n, xref).and_then(|datos| {
                                     borrar_anotacion(doc, n, xref).map(|()| {
                                         hechas.push(Hecho::Borrada { n, xref, datos });
                                         cache.olvidar_pagina(n);
                                     })
-                                }),
+                                })),
                             };
                             let _ = resp.send(r);
                         }
                         Pedido::Campos { resp } => {
                             let r = match &abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => campos_doc(doc),
+                                // Fuera de PDF no hay anotaciones ni formularios: lista vacía.
+                                Some((d, _)) => d.pdf().map_or_else(|_| Ok(Vec::new()), |doc| campos_doc(doc)),
                             };
                             let _ = resp.send(r);
                         }
                         Pedido::Campo { n, xref, valor, resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => fijar_campo(doc, n, xref, &valor).map(|anterior| {
+                                Some((d, _)) => d.pdf_mut().and_then(|doc| fijar_campo(doc, n, xref, &valor).map(|anterior| {
                                     hechas.push(Hecho::Campo { n, xref, anterior });
                                     cache.olvidar_pagina(n);
-                                }),
+                                })),
                             };
                             let _ = resp.send(r);
                         }
                         Pedido::Deshacer { resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => deshacer(doc, &mut hechas).map(|pagina| {
+                                Some((d, _)) => d.pdf_mut().and_then(|doc| deshacer(doc, &mut hechas).map(|pagina| {
                                     if let Some(n) = pagina {
                                         cache.olvidar_pagina(n);
                                     }
                                     pagina
-                                }),
+                                })),
                             };
                             let _ = resp.send(r);
                         }
                         Pedido::DeshacerTodo { resp } => {
                             let r = match &mut abierto {
                                 None => Err("No hay un documento abierto".into()),
-                                Some((doc, _)) => deshacer_todo(doc, &mut hechas).map(|hecho| {
+                                Some((d, _)) => d.pdf_mut().and_then(|doc| deshacer_todo(doc, &mut hechas).map(|hecho| {
                                     if hecho {
                                         cache.vaciar();
                                     }
                                     hecho
-                                }),
+                                })),
                             };
                             let _ = resp.send(r);
                         }
@@ -530,10 +567,10 @@ impl Motor {
                                     "No se puede guardar encima del PDF abierto. Elige otro nombre.".into(),
                                 ),
                                 // Organizar no cambia el PDF abierto: sus cambios siguen pudiendo deshacerse.
-                                Some((doc, _)) => match &hojas {
+                                Some((d, _)) => d.pdf().and_then(|doc| match &hojas {
                                     Some(h) => organizar_y_guardar(doc, h, &destino),
                                     None => guardar_doc(doc, &destino).map(|()| hechas.clear()),
-                                },
+                                }),
                             };
                             let _ = resp.send(r);
                         }
@@ -545,7 +582,7 @@ impl Motor {
                     if let Some(b) = busqueda.as_mut() {
                         let r = match &abierto {
                             None => Err("No hay un documento abierto".into()),
-                            Some((doc, _)) => b.avanzar(doc),
+                            Some((d, _)) => b.avanzar(d.doc()),
                         };
                         match r {
                             Ok(false) => {}
@@ -582,10 +619,10 @@ impl Motor {
                 let clave = (p.n, p.ancho);
                 let r = match (&abierto, p.recorte) {
                     (None, _) => Err("No hay un documento abierto".into()),
-                    (Some((doc, _)), Some(recorte)) => pintar_recorte(doc, p.n, recorte),
-                    (Some((doc, _)), None) => match cache.leer(clave) {
+                    (Some((d, _)), Some(recorte)) => pintar_recorte(d.doc(), p.n, recorte),
+                    (Some((d, _)), None) => match cache.leer(clave) {
                         Some(jpg) => Ok(jpg),
-                        None => pintar(doc, p.n, p.ancho).inspect(|jpg| {
+                        None => pintar(d.doc(), p.n, p.ancho).inspect(|jpg| {
                             // Las miniaturas no: la pantalla las conserva.
                             if p.ancho != MINIATURA {
                                 cache.guardar(clave, jpg.clone());
@@ -599,9 +636,9 @@ impl Motor {
         Motor(tx)
     }
 
-    pub fn abrir(&self, ruta: String, archivo: Option<File>) -> Result<Info, String> {
+    pub fn abrir(&self, ruta: String, nombre: String, archivo: Option<File>) -> Result<Info, String> {
         let (tx, rx) = mpsc::channel();
-        self.0.send(Pedido::Abrir { ruta, archivo, resp: tx }).map_err(texto)?;
+        self.0.send(Pedido::Abrir { ruta, nombre, archivo, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
@@ -771,28 +808,98 @@ impl Motor {
     }
 }
 
-fn abrir_doc(ruta: &str) -> Result<(PdfDocument, Info), String> {
+/// Tamaño de hoja para los formatos de texto corrido (Word, EPUB, TXT…): cómodo de leer en el celular.
+const HOJA_LECTURA: (f32, f32, f32) = (420.0, 600.0, 11.0);
+
+fn abrir_doc(ruta: &str, nombre: &str) -> Result<(Abierto, Info), String> {
     let t = Instant::now();
-    let doc = PdfDocument::open(ruta).map_err(|e| format!("No se pudo abrir este archivo: {e}"))?;
-    if doc.needs_password().map_err(texto)? {
-        return Err("Este PDF tiene contraseña. Abrir PDFs con contraseña llegará en una próxima versión.".into());
-    }
-    let paginas = doc.page_count().map_err(texto)?;
+    let cabecera = leer_cabecera(ruta).map_err(|e| format!("No se pudo abrir este archivo: {e}"))?;
+    let doc = if cabecera.windows(5).any(|w| w == b"%PDF-") {
+        let doc = PdfDocument::open(ruta).map_err(|e| format!("No se pudo abrir este archivo: {e}"))?;
+        if doc.needs_password().map_err(texto)? {
+            return Err("Este PDF tiene contraseña. Abrir PDFs con contraseña llegará en una próxima versión.".into());
+        }
+        Abierto::Pdf(doc)
+    } else {
+        let tipo = tipo_de(nombre, &cabecera).ok_or("Dakarta todavía no sabe abrir este tipo de archivo.")?;
+        let bytes = std::fs::read(ruta).map_err(|e| format!("No se pudo abrir este archivo: {e}"))?;
+        let mut doc = Document::from_bytes(&bytes, tipo).map_err(|e| format!("No se pudo abrir este archivo: {e}"))?;
+        if doc.is_reflowable().map_err(texto)? {
+            let (ancho, alto, letra) = HOJA_LECTURA;
+            doc.layout(ancho, alto, letra).map_err(texto)?;
+        }
+        Abierto::Otro(doc)
+    };
+    let paginas = doc.doc().page_count().map_err(texto)?;
     if paginas < 1 {
         return Err("El documento no tiene páginas.".into());
     }
-    let b = doc.load_page(0).and_then(|p| p.bounds()).map_err(texto)?;
-    let indice = doc.outlines().map(|o| entradas(&o)).unwrap_or_default();
+    let b = doc.doc().load_page(0).and_then(|p| p.bounds()).map_err(texto)?;
+    let indice = doc.doc().outlines().map(|o| entradas(&o)).unwrap_or_default();
     let info = Info {
         paginas,
         ancho: b.width(),
         alto: b.height(),
         indice,
         ms: t.elapsed().as_millis(),
+        pdf: matches!(doc, Abierto::Pdf(_)),
         ruta: String::new(),
         nombre: String::new(),
     };
     Ok((doc, info))
+}
+
+fn leer_cabecera(ruta: &str) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut c = Vec::with_capacity(1024);
+    File::open(ruta)?.take(1024).read_to_end(&mut c)?;
+    Ok(c)
+}
+
+/// Qué tipo de archivo es (para MuPDF): por la extensión del nombre y, si no la tiene, por sus primeros bytes.
+fn tipo_de(nombre: &str, cabecera: &[u8]) -> Option<&'static str> {
+    const CONOCIDOS: [&str; 22] = [
+        "docx", "xlsx", "pptx", "epub", "mobi", "fb2", "txt", "text", "log", "htm", "html", "xhtml", "xps", "oxps",
+        "cbz", "png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff",
+    ];
+    let extension = nombre.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    if let Some(e) = extension.as_deref().and_then(|e| CONOCIDOS.iter().find(|c| **c == e)) {
+        return Some(e);
+    }
+    let empieza = |firma: &[u8]| cabecera.starts_with(firma);
+    let contiene = |texto: &[u8]| cabecera.windows(texto.len()).any(|w| w == texto);
+    if empieza(b"PK\x03\x04") {
+        return Some(if contiene(b"application/epub+zip") {
+            "epub"
+        } else if contiene(b"[Content_Types].xml") || contiene(b"word/") {
+            "docx"
+        } else if contiene(b"xl/") {
+            "xlsx"
+        } else if contiene(b"ppt/") {
+            "pptx"
+        } else {
+            "cbz"
+        });
+    }
+    if empieza(b"\xFF\xD8\xFF") {
+        return Some("jpg");
+    }
+    if empieza(b"\x89PNG") {
+        return Some("png");
+    }
+    if empieza(b"GIF8") {
+        return Some("gif");
+    }
+    if empieza(b"BM") {
+        return Some("bmp");
+    }
+    if empieza(b"II*\0") || empieza(b"MM\0*") {
+        return Some("tiff");
+    }
+    // Texto legible (sin bytes de control raros): se abre como TXT.
+    let texto = String::from_utf8_lossy(cabecera);
+    let raros = texto.chars().filter(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t')).count();
+    (!cabecera.is_empty() && raros == 0 && !texto.contains('\u{FFFD}')).then_some("txt")
 }
 
 fn entradas(o: &[Outline]) -> Vec<Entrada> {

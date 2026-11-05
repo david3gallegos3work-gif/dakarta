@@ -17,10 +17,11 @@ fn archivo_inicial(inicial: State<'_, Inicial>) -> Option<String> {
 }
 
 /// "Abrir con Dakarta": en Windows llega una ruta; en Android, un content://.
+/// `nombre`: el que muestra Android para el archivo; sirve para saber su tipo (Word, EPUB…).
 #[tauri::command]
-async fn abrir_ruta(app: AppHandle, motor: State<'_, Motor>, ruta: String) -> Result<Info, String> {
+async fn abrir_ruta(app: AppHandle, motor: State<'_, Motor>, ruta: String, nombre: Option<String>) -> Result<Info, String> {
     let ruta = ruta.parse::<FilePath>().map_err(|e| e.to_string())?;
-    abrir(&app, &motor, ruta)
+    abrir(&app, &motor, ruta, nombre)
 }
 
 /// Abre en el navegador la descarga de una versión nueva; solo las de Dakarta.
@@ -205,6 +206,12 @@ async fn guardar_copia(
     Ok(Some(destino))
 }
 
+/// Lo que Dakarta sabe abrir: PDF para todo; los demás para leer, buscar y copiar texto.
+const FORMATOS: &[&str] = &[
+    "pdf", "docx", "xlsx", "pptx", "epub", "mobi", "fb2", "txt", "htm", "html", "xps", "oxps", "cbz", "png", "jpg",
+    "jpeg", "gif", "bmp", "tif", "tiff",
+];
+
 /// Windows: abre la carpeta con el PDF seleccionado para poder enviarlo.
 #[tauri::command]
 fn mostrar_archivo(app: AppHandle, ruta: String) -> Result<(), String> {
@@ -213,16 +220,22 @@ fn mostrar_archivo(app: AppHandle, ruta: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn elegir_pdf(app: AppHandle, motor: State<'_, Motor>) -> Result<Option<Info>, String> {
-    let Some(ruta) = app.dialog().file().add_filter("PDF", &["pdf"]).blocking_pick_file() else {
+    let Some(ruta) = app
+        .dialog()
+        .file()
+        .add_filter("Documentos", FORMATOS)
+        .add_filter("PDF", &["pdf"])
+        .blocking_pick_file()
+    else {
         return Ok(None);
     };
-    abrir(&app, &motor, ruta).map(Some)
+    abrir(&app, &motor, ruta, None).map(Some)
 }
 
 /// Windows: la ruta del archivo. Android: el content:// se abre por su descriptor (/proc/self/fd), sin copiar
 /// el archivo; si así no se puede (un adjunto que llega como flujo), se copia a la caché de la app.
 #[cfg_attr(not(target_os = "android"), allow(unused_variables))]
-fn abrir(app: &AppHandle, motor: &Motor, ruta: FilePath) -> Result<Info, String> {
+fn abrir(app: &AppHandle, motor: &Motor, ruta: FilePath, nombre: Option<String>) -> Result<Info, String> {
     #[cfg(target_os = "android")]
     {
         if let FilePath::Url(url) = &ruta {
@@ -233,27 +246,28 @@ fn abrir(app: &AppHandle, motor: &Motor, ruta: FilePath) -> Result<Info, String>
                 o.read(true);
                 app.fs().open(ruta.clone(), o).map_err(|e| e.to_string())
             };
+            // Nombre de respaldo; el bueno lo da Android con OpenableColumns (llega en `nombre`).
+            let nombre = nombre.filter(|n| !n.is_empty()).unwrap_or_else(|| {
+                url.path_segments()
+                    .and_then(|mut s| s.next_back())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.replace("%20", " "))
+                    .unwrap_or_else(|| "Documento".into())
+            });
             let archivo = leer()?;
             let fd = format!("/proc/self/fd/{}", archivo.as_raw_fd());
             let directo = std::fs::File::open(&fd).and_then(|f| f.metadata()).is_ok_and(|m| m.is_file());
             let mut info = if directo {
-                motor.abrir(fd, Some(archivo))?
+                motor.abrir(fd, nombre.clone(), Some(archivo))?
             } else {
-                let copia = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("abierto.pdf");
+                let copia = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("abierto");
                 std::fs::create_dir_all(copia.parent().expect("la caché tiene carpeta")).map_err(|e| e.to_string())?;
                 // Se borra en vez de sobrescribir: el documento anterior sigue leyendo la copia vieja hasta cambiarse.
                 let _ = std::fs::remove_file(&copia);
                 let mut destino = std::fs::File::create(&copia).map_err(|e| e.to_string())?;
                 std::io::copy(&mut leer()?, &mut destino).map_err(|e| e.to_string())?;
-                motor.abrir(copia.to_string_lossy().into_owned(), None)?
+                motor.abrir(copia.to_string_lossy().into_owned(), nombre.clone(), None)?
             };
-            // Nombre de respaldo; el bueno lo da Android con OpenableColumns.
-            let nombre = url
-                .path_segments()
-                .and_then(|mut s| s.next_back())
-                .filter(|s| !s.is_empty())
-                .map(|s| s.replace("%20", " "))
-                .unwrap_or_else(|| "Documento".into());
             info.completar(url.to_string(), nombre);
             return Ok(info);
         }
@@ -261,7 +275,7 @@ fn abrir(app: &AppHandle, motor: &Motor, ruta: FilePath) -> Result<Info, String>
     let ruta = ruta.into_path().map_err(|e| e.to_string())?;
     let original = ruta.to_string_lossy().into_owned();
     let nombre = ruta.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Documento".into());
-    let mut info = motor.abrir(original.clone(), None)?;
+    let mut info = motor.abrir(original.clone(), nombre.clone(), None)?;
     info.completar(original, nombre);
     Ok(info)
 }
