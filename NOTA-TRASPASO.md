@@ -2,7 +2,7 @@
 
 **Fecha y lugar:** 2026-11-03 22:20, en la PC. Actualizada el 2026-11-04 (Ecuador) desde la nube.
 **IA y aparato:** Claude Code. Revisión en la PC; arreglos en la nube.
-**Rama:** `main` (versión 0.4.2).
+**Rama:** `main` (versión 0.4.3).
 
 ## Hecho en la nube (2026-11-03 y 2026-11-04)
 
@@ -25,6 +25,7 @@
 - 0.4.0 (Fase 4, primera parte): se abren para leer Word/Excel/PowerPoint, EPUB, MOBI, FB2, TXT, HTML, XPS, CBZ e imágenes (MuPDF con `html, epub, xps, cbz, img`). Anotar y organizar solo en PDF. "Abrir con" en Android y Windows para esos formatos (no para fotos). Pruebas: 23 del motor.
 - 0.4.1: desde Gemini o WhatsApp no salía Dakarta para Word: esas apps entregan los .docx como `application/msword` u `application/octet-stream`. Se registran también esas etiquetas; el motor mira el contenido real. Office antiguo (.doc/.xls/.ppt) da un mensaje claro.
 - 0.4.2: la marca de «abriendo» se quita al verse la primera hoja o al salir de la app (antes a los 5 s: si se salía antes, la vez siguiente no reabría y salía el aviso, alternando). Inicio: últimos 3 de cada tipo (PDF, Word, Excel, PowerPoint, Libros, Texto, Imágenes, Otros); se recuerdan 30. Nombres sacados del enlace se muestran limpios (`nombreLegible`).
+- 0.4.3: lector de Word propio (`motor/word.rs`, con `zip` y `roxmltree`): tamaño de hoja y márgenes del documento, alineación, negritas/cursivas/subrayado/color, viñetas y listas numeradas, tablas con columnas (bordes si los tiene), saltos de página (como capítulos de un EPUB en memoria). Panel ☰: últimos archivos también por tipo. Pendiente: imágenes dentro del Word, encabezados/pies, cuadros de texto; Excel y PowerPoint con la misma idea.
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo
