@@ -2,7 +2,7 @@
 
 **Fecha y lugar:** 2026-11-03 22:20, en la PC. Actualizada el 2026-11-04 (Ecuador) desde la nube.
 **IA y aparato:** Claude Code. Revisión en la PC; arreglos en la nube.
-**Rama:** `main` (versión 0.4.4).
+**Rama:** `main` (versión 0.4.5).
 
 ## Hecho en la nube (2026-11-03 y 2026-11-04)
 
@@ -27,6 +27,7 @@
 - 0.4.2: la marca de «abriendo» se quita al verse la primera hoja o al salir de la app (antes a los 5 s: si se salía antes, la vez siguiente no reabría y salía el aviso, alternando). Inicio: últimos 3 de cada tipo (PDF, Word, Excel, PowerPoint, Libros, Texto, Imágenes, Otros); se recuerdan 30. Nombres sacados del enlace se muestran limpios (`nombreLegible`).
 - 0.4.3: lector de Word propio (`motor/word.rs`, con `zip` y `roxmltree`): tamaño de hoja y márgenes del documento, alineación, negritas/cursivas/subrayado/color, viñetas y listas numeradas, tablas con columnas (bordes si los tiene), saltos de página (como capítulos de un EPUB en memoria). Panel ☰: últimos archivos también por tipo. Pendiente: imágenes dentro del Word, encabezados/pies, cuadros de texto; Excel y PowerPoint con la misma idea.
 - 0.4.4: David descartó la Fase 4. Se quitó todo lo de otros formatos (lector de Word, lectores extra de MuPDF, `zip`/`roxmltree`, tipos de archivo, «Abrir con» de otros formatos, archivos de prueba) y la separación de últimos por tipo. Se quedan: reabrir sin alternar y nombres limpios.
+- 0.4.5: unir PDFs (lo que faltaba de la Fase 3). Inicio → «Unir PDFs» o panel ☰ → «Unir con otros PDFs». El motor abre los agregados (`abrir_agregado`/`cerrar_agregados`), pinta sus miniaturas (`?a=N`) y une con `unir_y_guardar`. En Android el PDF elegido llega por `pendiente()` y se desvía a la pantalla de unir. Pruebas: 23 del motor, 19 de la pantalla.
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo
@@ -71,7 +72,7 @@ Búsqueda, últimos archivos, compartir, selector de Android con permiso guardab
 
 1. David prueba la 0.2.12 en el celular: Nota amarilla, formulario (F/M y casillas), mover un sello, buscar en un PDF grande, guardar copia, tocar el índice impreso y las dos manijas de selección.
 2. ✅ Separados `App.tsx` y `motor.rs` (hallazgo 13), junto con la 0.2.14.
-3. Fase 3: organizar un PDF ✅ (0.3.0). Unir varios PDFs (0.3.1) quedó pendiente porque David adelantó la Fase 4.
+3. Fase 3 completa: organizar un PDF ✅ (0.3.0) y unir varios PDFs ✅ (0.4.5).
 4. Fase 4: descartada por David (2026-11-05); quitada en la 0.4.4.
 
 ## Pendiente para el celular

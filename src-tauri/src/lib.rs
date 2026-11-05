@@ -219,10 +219,19 @@ async fn elegir_pdf(app: AppHandle, motor: State<'_, Motor>) -> Result<Option<In
     abrir(&app, &motor, ruta).map(Some)
 }
 
+/// Lo que el motor necesita para leer un archivo: su ruta, el archivo abierto (Android) y su nombre.
+struct ParaLeer {
+    ruta: String,
+    archivo: Option<std::fs::File>,
+    nombre: String,
+    original: String,
+}
+
 /// Windows: la ruta del archivo. Android: el content:// se abre por su descriptor (/proc/self/fd), sin copiar
-/// el archivo; si así no se puede (un adjunto que llega como flujo), se copia a la caché de la app.
+/// el archivo; si así no se puede (un adjunto que llega como flujo), se copia a la caché de la app con `copia`
+/// como nombre.
 #[cfg_attr(not(target_os = "android"), allow(unused_variables))]
-fn abrir(app: &AppHandle, motor: &Motor, ruta: FilePath) -> Result<Info, String> {
+fn preparar(app: &AppHandle, ruta: FilePath, copia: &str) -> Result<ParaLeer, String> {
     #[cfg(target_os = "android")]
     {
         if let FilePath::Url(url) = &ruta {
@@ -236,17 +245,6 @@ fn abrir(app: &AppHandle, motor: &Motor, ruta: FilePath) -> Result<Info, String>
             let archivo = leer()?;
             let fd = format!("/proc/self/fd/{}", archivo.as_raw_fd());
             let directo = std::fs::File::open(&fd).and_then(|f| f.metadata()).is_ok_and(|m| m.is_file());
-            let mut info = if directo {
-                motor.abrir(fd, Some(archivo))?
-            } else {
-                let copia = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("abierto.pdf");
-                std::fs::create_dir_all(copia.parent().expect("la caché tiene carpeta")).map_err(|e| e.to_string())?;
-                // Se borra en vez de sobrescribir: el documento anterior sigue leyendo la copia vieja hasta cambiarse.
-                let _ = std::fs::remove_file(&copia);
-                let mut destino = std::fs::File::create(&copia).map_err(|e| e.to_string())?;
-                std::io::copy(&mut leer()?, &mut destino).map_err(|e| e.to_string())?;
-                motor.abrir(copia.to_string_lossy().into_owned(), None)?
-            };
             // Nombre de respaldo; el bueno lo da Android con OpenableColumns.
             let nombre = url
                 .path_segments()
@@ -254,16 +252,62 @@ fn abrir(app: &AppHandle, motor: &Motor, ruta: FilePath) -> Result<Info, String>
                 .filter(|s| !s.is_empty())
                 .map(|s| s.replace("%20", " "))
                 .unwrap_or_else(|| "Documento".into());
-            info.completar(url.to_string(), nombre);
-            return Ok(info);
+            if directo {
+                return Ok(ParaLeer { ruta: fd, archivo: Some(archivo), nombre, original: url.to_string() });
+            }
+            let destino = app.path().app_cache_dir().map_err(|e| e.to_string())?.join(copia);
+            std::fs::create_dir_all(destino.parent().expect("la caché tiene carpeta")).map_err(|e| e.to_string())?;
+            // Se borra en vez de sobrescribir: el documento anterior sigue leyendo la copia vieja hasta cambiarse.
+            let _ = std::fs::remove_file(&destino);
+            let mut f = std::fs::File::create(&destino).map_err(|e| e.to_string())?;
+            std::io::copy(&mut leer()?, &mut f).map_err(|e| e.to_string())?;
+            return Ok(ParaLeer { ruta: destino.to_string_lossy().into_owned(), archivo: None, nombre, original: url.to_string() });
         }
     }
     let ruta = ruta.into_path().map_err(|e| e.to_string())?;
     let original = ruta.to_string_lossy().into_owned();
     let nombre = ruta.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Documento".into());
-    let mut info = motor.abrir(original.clone(), None)?;
-    info.completar(original, nombre);
+    Ok(ParaLeer { ruta: original.clone(), archivo: None, nombre, original })
+}
+
+fn abrir(app: &AppHandle, motor: &Motor, ruta: FilePath) -> Result<Info, String> {
+    let p = preparar(app, ruta, "abierto.pdf")?;
+    let mut info = motor.abrir(p.ruta, p.archivo)?;
+    info.completar(p.original, p.nombre);
     Ok(info)
+}
+
+/// Un PDF agregado para unir: su número en el motor, cuántas páginas tiene y su nombre.
+#[derive(serde::Serialize)]
+struct Agregado {
+    archivo: usize,
+    paginas: i32,
+    nombre: String,
+}
+
+/// Unir PDFs: abre otro PDF para unirlo. En Android llega la ruta elegida; en Windows se pregunta aquí
+/// (se pueden elegir varios a la vez).
+#[tauri::command]
+async fn abrir_agregado(app: AppHandle, motor: State<'_, Motor>, ruta: Option<String>) -> Result<Vec<Agregado>, String> {
+    let rutas = match ruta {
+        Some(r) => vec![r.parse::<FilePath>().map_err(|e| e.to_string())?],
+        None => app.dialog().file().add_filter("PDF", &["pdf"]).blocking_pick_files().unwrap_or_default(),
+    };
+    let mut lista = Vec::new();
+    for r in rutas {
+        // Cada copia en la caché con su nombre: los PDFs agregados antes siguen leyendo la suya.
+        static SIGUIENTE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = SIGUIENTE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let p = preparar(&app, r, &format!("unir-{n}.pdf"))?;
+        let (archivo, paginas) = motor.abrir_agregado(p.ruta, p.archivo)?;
+        lista.push(Agregado { archivo, paginas, nombre: p.nombre });
+    }
+    Ok(lista)
+}
+
+#[tauri::command]
+fn cerrar_agregados(motor: State<'_, Motor>) {
+    motor.cerrar_agregados();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -301,7 +345,9 @@ pub fn run() {
     deshacer,
     deshacer_todo,
     guardar_en_cache,
-    guardar_copia
+    guardar_copia,
+    abrir_agregado,
+    cerrar_agregados
 ])
         .run(tauri::generate_context!())
         .expect("no se pudo iniciar Dakarta");
