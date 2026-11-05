@@ -440,7 +440,7 @@ fn un_pdf_con_contrasena_se_abre_con_ella_y_la_conserva_al_organizar() {
     let ruta = |n: &str| carpeta.join(n).to_string_lossy().into_owned();
     let original = PdfDocument::open(concat!(env!("CARGO_MANIFEST_DIR"), "/pruebas/formulario.pdf")).unwrap();
     // Proteger: copia cifrada con la contraseña.
-    guardar_doc_con(&original, &ruta("protegido.pdf"), &Proteccion::de("Ñandú-2026").unwrap()).unwrap();
+    guardar_doc_con(&original, &ruta("protegido.pdf"), &Proteccion::de("Ñandú-2026").unwrap(), None).unwrap();
     assert_eq!(abrir_pdf(&ruta("protegido.pdf"), None).err().unwrap(), PIDE_CLAVE);
     assert_eq!(abrir_pdf(&ruta("protegido.pdf"), Some("otra")).err().unwrap(), CLAVE_MAL);
     let (doc, info) = abrir_doc(&ruta("protegido.pdf"), Some("Ñandú-2026")).unwrap();
@@ -453,22 +453,50 @@ fn un_pdf_con_contrasena_se_abre_con_ella_y_la_conserva_al_organizar() {
     assert!(abrir_pdf(&ruta("organizado.pdf"), Some("Ñandú-2026")).is_ok());
     assert_eq!(abrir_pdf(&ruta("organizado.pdf"), None).err().unwrap(), PIDE_CLAVE);
     // Cambiar la contraseña: la nueva abre la copia y la vieja ya no.
-    guardar_doc_con(&doc, &ruta("cambiada.pdf"), &Proteccion::de("nueva").unwrap()).unwrap();
+    guardar_doc_con(&doc, &ruta("cambiada.pdf"), &Proteccion::de("nueva").unwrap(), Some("Ñandú-2026")).unwrap();
     assert!(abrir_pdf(&ruta("cambiada.pdf"), Some("nueva")).is_ok());
     assert_eq!(abrir_pdf(&ruta("cambiada.pdf"), Some("Ñandú-2026")).err().unwrap(), CLAVE_MAL);
     // Unir un PDF con contraseña con otro: el unido lleva la del primero y las hojas de los dos.
     let otro = abrir_pdf(&ruta("cambiada.pdf"), Some("nueva")).unwrap();
     let hojas = [Hoja { pagina: 0, giro: 0, archivo: ABIERTO }, Hoja { pagina: 0, giro: 0, archivo: 0 }];
-    // (MuPDF le deja al abierto la contraseña nueva: el motor la recuerda.)
-    unir_y_guardar(Some((&doc, Some("nueva"))), &[(&otro, Some("nueva"))], &hojas, &ruta("unido.pdf")).unwrap();
-    assert_eq!(abrir_pdf(&ruta("unido.pdf"), Some("nueva")).unwrap().page_count().unwrap(), 2);
+    // El abierto no cambió: sigue con su contraseña.
+    unir_y_guardar(Some((&doc, Some("Ñandú-2026"))), &[(&otro, Some("nueva"))], &hojas, &ruta("unido.pdf")).unwrap();
+    assert_eq!(abrir_pdf(&ruta("unido.pdf"), Some("Ñandú-2026")).unwrap().page_count().unwrap(), 2);
     assert_eq!(abrir_pdf(&ruta("unido.pdf"), None).err().unwrap(), PIDE_CLAVE);
     // Quitar la contraseña: la copia se abre sin pedirla.
-    guardar_doc_con(&doc, &ruta("sin-clave.pdf"), &Proteccion::de("").unwrap()).unwrap();
+    guardar_doc_con(&doc, &ruta("sin-clave.pdf"), &Proteccion::de("").unwrap(), Some("Ñandú-2026")).unwrap();
     let (_, info) = abrir_doc(&ruta("sin-clave.pdf"), None).unwrap();
     assert!(!info.con_clave);
     // Un PDF sin contraseña no pide nada aunque se mande una.
     assert!(!abrir_doc(&ruta("sin-clave.pdf"), Some("x")).unwrap().1.con_clave);
     assert!(Proteccion::de(&"x".repeat(200)).is_err());
+    std::fs::remove_dir_all(&carpeta).unwrap();
+}
+
+#[test]
+fn un_pdf_con_contrasena_se_lee_entero_y_no_cambia_al_proteger_una_copia() {
+    // Antes, saber si tenía contraseña la hacía olvidar: el PDF abría con las hojas en blanco.
+    let mut doc = pdf_con_texto("leer", 3);
+    let carpeta = std::env::temp_dir().join(format!("dakarta-leer-{}", std::process::id()));
+    std::fs::create_dir_all(&carpeta).unwrap();
+    let ruta = |n: &str| carpeta.join(n).to_string_lossy().into_owned();
+    guardar_doc_con(&doc, &ruta("p.pdf"), &Proteccion::de("abc").unwrap(), None).unwrap();
+    let (p, info) = abrir_doc(&ruta("p.pdf"), Some("abc")).unwrap();
+    assert!(info.con_clave);
+    assert_eq!(textos(&p), ["leer 1", "leer 2", "leer 3"]);
+    // Una copia del protegido (igual que al guardar anotaciones) también se lee entera.
+    guardar_doc(&p, &ruta("igual.pdf")).unwrap();
+    assert_eq!(textos(&abrir_pdf(&ruta("igual.pdf"), Some("abc")).unwrap()), ["leer 1", "leer 2", "leer 3"]);
+    // Un PDF agregado para unir, con contraseña, aporta sus hojas con su texto.
+    let hojas = [Hoja { pagina: 0, giro: 0, archivo: ABIERTO }, Hoja { pagina: 2, giro: 0, archivo: 0 }];
+    unir_y_guardar(Some((&doc, None)), &[(&p, Some("abc"))], &hojas, &ruta("unido.pdf")).unwrap();
+    assert_eq!(textos(&abrir_pdf(&ruta("unido.pdf"), None).unwrap()), ["leer 1", "leer 3"]);
+    // Tras proteger una copia, el abierto no cambia: se sigue leyendo y se guarda sin contraseña.
+    anotar_caja(&mut doc, 0, 0.1, 0.1, "Nota", (0.0, 0.0, 0.0), 12.0, true).unwrap();
+    guardar_doc_con(&doc, &ruta("q.pdf"), &Proteccion::de("xyz").unwrap(), None).unwrap();
+    assert_eq!(textos(&doc)[2], "leer 3");
+    guardar_doc(&doc, &ruta("sigue.pdf")).unwrap();
+    assert_eq!(textos(&abrir_pdf(&ruta("sigue.pdf"), None).unwrap()), ["leer 1", "leer 2", "leer 3"]);
+    assert_eq!(textos(&abrir_doc(&ruta("q.pdf"), Some("xyz")).unwrap().0)[1], "leer 2");
     std::fs::remove_dir_all(&carpeta).unwrap();
 }
