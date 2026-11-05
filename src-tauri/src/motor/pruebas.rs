@@ -203,7 +203,7 @@ fn lo_escrito_de_un_tiron_se_deshace_en_un_solo_paso() {
     let ruta = ruta.to_string_lossy().into_owned();
     guardar_doc(&doc_de(300.0, 400.0), &ruta).unwrap();
     let motor = Motor::nuevo();
-    motor.abrir(ruta.clone(), "prueba.pdf".into(), None).unwrap();
+    motor.abrir(ruta.clone(), None).unwrap();
     motor.anotar_caja(0, 0.1, 0.1, "Nota".into(), (0.0, 0.0, 0.0), 12.0, true).unwrap();
     let xref = motor.anotaciones(0).unwrap()[0].xref;
     let negro = Some((0.0, 0.0, 0.0));
@@ -329,77 +329,4 @@ fn duplicar_una_hoja_con_formulario_no_duplica_las_casillas() {
     let acepto = campos_doc(&nuevo).unwrap().into_iter().find(|c| c.nombre == "acepto").unwrap();
     fijar_campo(&mut nuevo, 0, acepto.xref, &acepto.encendido).unwrap();
     std::fs::remove_file(&destino).unwrap();
-}
-
-fn prueba(nombre: &str) -> String {
-    format!("{}/pruebas/{nombre}", env!("CARGO_MANIFEST_DIR"))
-}
-
-#[test]
-fn reconoce_el_tipo_por_el_nombre_o_por_los_primeros_bytes() {
-    assert_eq!(tipo_de("Informe.DOCX", b""), Some("docx"));
-    assert_eq!(tipo_de("libro.epub", b""), Some("epub"));
-    // Android: la ruta no trae nombre; se mira el contenido.
-    let cab = |n: &str| leer_cabecera(&prueba(n)).unwrap();
-    assert_eq!(tipo_de("57", &cab("libro.epub")), Some("epub"));
-    assert_eq!(tipo_de("57", &cab("documento.docx")), Some("docx"));
-    assert_eq!(tipo_de("57", &cab("foto.jpg")), Some("jpg"));
-    assert_eq!(tipo_de("57", &cab("nota.txt")), Some("txt"));
-    assert_eq!(tipo_de("57", &[0u8, 1, 2, 3, 200, 7]), None);
-}
-
-#[test]
-fn abre_word_epub_txt_e_imagen_para_leer_buscar_y_copiar() {
-    let motor = Motor::nuevo();
-    for (archivo, palabra) in [("documento.docx", "Informe"), ("libro.epub", "Capítulo"), ("nota.txt", "Jamón"), ("foto.jpg", "")] {
-        // Se copian a un nombre sin extensión, como llegan en Android.
-        let sin_nombre = std::env::temp_dir().join(format!("dakarta-fmt-{}-{archivo}-57", std::process::id()));
-        std::fs::copy(prueba(archivo), &sin_nombre).unwrap();
-        for (ruta, nombre) in [(prueba(archivo), archivo.to_string()), (sin_nombre.to_string_lossy().into_owned(), "57".into())] {
-            let info = motor.abrir(ruta, nombre, None).unwrap_or_else(|e| panic!("{archivo}: {e}"));
-            assert!(!info.pdf, "{archivo}");
-            assert!(info.paginas >= 1, "{archivo}");
-            if !palabra.is_empty() {
-                let texto: String = motor.palabras(0).unwrap().into_iter().map(|p| p.texto).collect();
-                assert!(texto.contains(palabra), "{archivo}: {texto}");
-            }
-            assert!(motor.anotar_caja(0, 0.1, 0.1, "x".into(), (0.0, 0.0, 0.0), 12.0, false).unwrap_err().contains("solo se puede"));
-            assert!(motor.anotaciones(0).unwrap().is_empty());
-        }
-        std::fs::remove_file(&sin_nombre).unwrap();
-    }
-}
-
-#[test]
-fn un_word_antiguo_da_un_mensaje_claro() {
-    let ruta = std::env::temp_dir().join(format!("dakarta-doc-viejo-{}", std::process::id()));
-    let mut bytes = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1".to_vec();
-    bytes.resize(2048, 0);
-    std::fs::write(&ruta, bytes).unwrap();
-    let e = abrir_doc(ruta.to_str().unwrap(), "informe.docx").err().unwrap();
-    assert!(e.contains("Office antiguo"), "{e}");
-    std::fs::remove_file(&ruta).unwrap();
-}
-
-#[test]
-fn un_word_conserva_hoja_fecha_vinetas_tabla_y_saltos() {
-    // Carta de prueba con datos inventados: tamaño Carta, fecha a la derecha, viñetas en negrita,
-    // lista numerada, tabla de firmas y un salto de página antes del último título.
-    let (d, info) = abrir_doc(&prueba("carta.docx"), "carta.docx").unwrap();
-    assert!(!info.pdf);
-    assert_eq!((info.ancho.round(), info.alto.round()), (612.0, 792.0));
-    assert_eq!(info.paginas, 3);
-    let texto = |n: i32| d.doc().load_page(n).unwrap().text(TextExtractOptions::default()).unwrap();
-    let primera = texto(0);
-    for buscado in ["Ibarra, 15 de abril de 2026", "• Representación Administrativa:", "1. Revisar el acta.", "3. Entregar", "Cédula"] {
-        assert!(primera.contains(buscado), "falta «{buscado}» en:\n{primera}");
-    }
-    assert!(texto(2).contains("Segunda página"), "el salto de página no creó hoja nueva");
-}
-
-#[test]
-fn un_word_sin_saltos_va_como_una_sola_pagina_web() {
-    let w = word::convertir(&std::fs::read(prueba("documento.docx")).unwrap()).unwrap();
-    assert_eq!(w.tipo, "html");
-    assert!(String::from_utf8(w.datos).unwrap().contains("Informe de prueba para Dakarta"));
 }

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Dakarta",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "identifier": "io.github.dakarta",
   "build": {
     "frontendDist": "../dist",
@@ -27,95 +27,11 @@
     "targets": "all",
     "fileAssociations": [
       {
-        "ext": [
-          "pdf"
-        ],
+        "ext": ["pdf"],
         "name": "Documento PDF",
         "description": "Documento PDF",
         "role": "Viewer",
         "mimeType": "application/pdf"
-      },
-      {
-        "ext": [
-          "docx"
-        ],
-        "name": "Documento de Word",
-        "description": "Documento de Word",
-        "role": "Viewer",
-        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-      },
-      {
-        "ext": [
-          "xlsx"
-        ],
-        "name": "Hoja de Excel",
-        "description": "Hoja de Excel",
-        "role": "Viewer",
-        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-      },
-      {
-        "ext": [
-          "pptx"
-        ],
-        "name": "Presentación de PowerPoint",
-        "description": "Presentación de PowerPoint",
-        "role": "Viewer",
-        "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-      },
-      {
-        "ext": [
-          "epub"
-        ],
-        "name": "Libro EPUB",
-        "description": "Libro EPUB",
-        "role": "Viewer",
-        "mimeType": "application/epub+zip"
-      },
-      {
-        "ext": [
-          "mobi"
-        ],
-        "name": "Libro MOBI",
-        "description": "Libro MOBI",
-        "role": "Viewer",
-        "mimeType": "application/x-mobipocket-ebook"
-      },
-      {
-        "ext": [
-          "fb2"
-        ],
-        "name": "Libro FB2",
-        "description": "Libro FB2",
-        "role": "Viewer",
-        "mimeType": "application/x-fictionbook+xml"
-      },
-      {
-        "ext": [
-          "xps",
-          "oxps"
-        ],
-        "name": "Documento XPS",
-        "description": "Documento XPS",
-        "role": "Viewer",
-        "mimeType": "application/vnd.ms-xpsdocument"
-      },
-      {
-        "ext": [
-          "cbz"
-        ],
-        "name": "Cómic CBZ",
-        "description": "Cómic CBZ",
-        "role": "Viewer",
-        "mimeType": "application/vnd.comicbook+zip"
-      },
-      {
-        "ext": [
-          "txt"
-        ],
-        "name": "Texto",
-        "description": "Texto",
-        "role": "Viewer",
-        "mimeType": "text/plain"
       }
     ],
     "license": "AGPL-3.0-or-later",
