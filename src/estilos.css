@@ -264,3 +264,17 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .tarjeta-aviso .clave-nota { font-size: 13px; opacity: 0.8; }
 .noche .campo-clave { background: #2f2f2f; color: #eee; border-color: #555; }
 .noche .clave-mal { color: #ef9a9a; }
+.organizar-acciones .boton-archivo { display: inline-flex; align-items: center; min-height: 40px; padding: 0 12px; border: 1px solid #9fb3c8; border-radius: 8px; background: #fff; cursor: pointer; }
+.organizar-acciones .boton-archivo.desactivado { opacity: 0.5; pointer-events: none; }
+.organizar-opcion { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.noche .organizar-acciones .boton-archivo { background: #2f2f2f; border-color: #555; }
+.recortar { position: fixed; inset: 0; z-index: 18; display: flex; flex-direction: column; background: #111; color: #eee; }
+.recortar-zona { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.recortar-foto { position: relative; touch-action: none; user-select: none; -webkit-user-select: none; }
+.recortar-foto img { display: block; width: 100%; height: 100%; pointer-events: none; }
+.recortar-marco { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.recortar-sombra { fill: rgba(0, 0, 0, 0.55); pointer-events: none; }
+.recortar-figura { fill: transparent; stroke: #fff; stroke-width: 2px; vector-effect: non-scaling-stroke; cursor: move; touch-action: none; }
+.recortar-esquina { position: absolute; width: 44px; height: 44px; transform: translate(-50%, -50%); touch-action: none; cursor: grab; }
+.recortar-esquina::after { content: ''; position: absolute; inset: 12px; border-radius: 50%; background: rgba(21, 101, 192, 0.35); border: 3px solid #fff; box-shadow: 0 0 3px #000; }
+.recortar .organizar-acciones { color: #1a1a1a; }

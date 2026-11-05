@@ -1,5 +1,6 @@
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Diseno } from './fotos.ts'
 import { ABIERTO, fichasDe, moverMarcadas, ordenarPorArchivo, type Ficha, type Fuente } from './organizar.ts'
 import type { Hoja } from './tipos.ts'
 import { MINIATURA } from './zoom.ts'
@@ -22,15 +23,23 @@ type Arrastre = { id: number; x: number; y: number; destino: number | null }
 /** Al unir, cada PDF lleva su color en el borde de sus hojas. */
 const COLORES_ARCHIVO = ['#1565c0', '#e65100', '#2e7d32', '#6a1b9a', '#c62828', '#00838f', '#ad1457', '#5d4037']
 
+/** Organizar las hojas del PDF abierto, unir varios PDFs o crear un PDF desde fotos. */
+export type Modo = 'organizar' | 'unir' | 'fotos'
+
+const android = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
+
 /**
  * Pantalla con todas las hojas en miniatura: mover, girar, quitar, duplicar o extraer, con deshacer.
- * Con `unir`, además se agregan otros PDFs y sus hojas se intercalan. Nada se cambia en ningún PDF hasta
- * guardar; ahí el motor arma un PDF nuevo con este orden.
+ * Al unir, además se agregan otros PDFs y sus hojas se intercalan; con fotos, cada foto es una hoja. Nada
+ * se cambia en ningún PDF hasta guardar; ahí se arma un PDF nuevo con este orden.
  */
 export function Organizar({
   fuentes: fuentesIniciales,
-  unir,
+  modo,
   onAgregar,
+  onFotos,
+  onRecortar,
+  miniaturas,
   guardando,
   onGuardar,
   onCerrar,
@@ -39,17 +48,27 @@ export function Organizar({
   onAviso,
 }: {
   fuentes: Fuente[]
-  unir: boolean
+  modo: Modo
   /** Pide uno o más PDFs para unir y devuelve los que se agregaron (vacío si se canceló). */
   onAgregar: () => Promise<Fuente[]>
+  /** Fotos: prepara las elegidas (o la tomada con la cámara) y devuelve una fuente por foto. */
+  onFotos?: (archivos: File[]) => Promise<Fuente[]>
+  /** Fotos: recortar la foto de ese número de archivo. */
+  onRecortar?: (archivo: number) => void
+  /** Fotos: la miniatura de cada una, por su número de archivo. */
+  miniaturas?: Record<number, string>
   guardando: boolean
-  onGuardar: (hojas: Hoja[], extraer: boolean) => void
+  /** `diseno`: solo con fotos; cómo van las fotos en las hojas. */
+  onGuardar: (hojas: Hoja[], extraer: boolean, diseno: Diseno) => void
   onCerrar: () => void
   /** Avisos de la app (copia guardada, errores): esta pantalla tapa los de siempre, así que los muestra ella. */
   aviso: string
   error: string
   onAviso: (texto: string) => void
 }) {
+  const unir = modo === 'unir'
+  const fotos = modo === 'fotos'
+  const [diseno, setDiseno] = useState<Diseno>('a4')
   const [fuentes, setFuentes] = useState(fuentesIniciales)
   const siguienteId = useRef(0)
   const [lista, setLista] = useState(() =>
@@ -110,7 +129,7 @@ export function Organizar({
     setMarcadas(copias)
   }
   const quitar = () => {
-    if (marcadasEnOrden.length === lista.length) {
+    if (!fotos && marcadasEnOrden.length === lista.length) {
       onAviso('Debe quedar al menos una página.')
       return
     }
@@ -118,10 +137,10 @@ export function Organizar({
     setMarcadas(new Set())
   }
   const hojas = (fichas: Ficha[]): Hoja[] => fichas.map((f) => ({ pagina: f.pagina, giro: f.giro, archivo: f.archivo }))
-  const agregar = async () => {
+  const agregar = async (pedir: () => Promise<Fuente[]> = onAgregar) => {
     setAgregando(true)
     try {
-      const nuevas = await onAgregar()
+      const nuevas = await pedir()
       if (!nuevas.length) return
       const fichas = nuevas.flatMap((f) => {
         const lista = fichasDe(f, siguienteId.current)
@@ -170,8 +189,29 @@ export function Organizar({
 
   const fichaArrastrada = arrastre && lista.find((f) => f.id === arrastre.id)
   const url = (f: Ficha) =>
-    `${convertFileSrc(String(f.pagina), 'pagina')}?w=${MINIATURA}${f.archivo === ABIERTO ? '' : `&a=${f.archivo}`}&o=${apertura}`
-  const titulo = unir ? 'Unir PDFs' : 'Organizar páginas'
+    fotos
+      ? (miniaturas?.[f.archivo] ?? '')
+      : `${convertFileSrc(String(f.pagina), 'pagina')}?w=${MINIATURA}${f.archivo === ABIERTO ? '' : `&a=${f.archivo}`}&o=${apertura}`
+  const titulo = unir ? 'Unir PDFs' : fotos ? 'Crear PDF desde fotos' : 'Organizar páginas'
+  /** Botón que abre la galería (varias fotos) o la cámara (una). */
+  const elegirFotos = (camara: boolean) => (
+    <label className={agregando ? 'boton-archivo desactivado' : 'boton-archivo'}>
+      {camara ? 'Cámara' : agregando ? 'Preparando…' : '+ Fotos'}
+      <input
+        type="file"
+        accept="image/*"
+        multiple={!camara}
+        capture={camara ? 'environment' : undefined}
+        disabled={agregando}
+        hidden
+        onChange={(e) => {
+          const archivos = [...(e.currentTarget.files ?? [])]
+          e.currentTarget.value = ''
+          if (archivos.length && onFotos) void agregar(() => onFotos(archivos))
+        }}
+      />
+    </label>
+  )
 
   return (
     <div className="organizar" role="dialog" aria-modal="true" aria-label={titulo}>
@@ -195,7 +235,11 @@ export function Organizar({
       ) : (
         <p className={aviso ? 'organizar-ayuda organizar-ok' : 'organizar-ayuda'} role="status">
           {aviso ||
-            (unir && !lista.length
+            (fotos && diseno === 'documentos' && !marcadas.size
+              ? 'Van dos por fila a tamaño real: cédula (frente y reverso), luego papeleta (frente y reverso). Marca cada foto y toca «Recortar» para dejar solo el documento.'
+              : fotos && !lista.length
+              ? `Toca «+ Fotos» para elegirlas${android ? ' o «Cámara» para tomar una' : ''}. Cada foto será una hoja.`
+              : unir && !lista.length
               ? 'Toca «Agregar PDF» para elegir los PDFs que quieres unir.'
               : 'Toca las hojas para marcarlas. Mantén presionada una y arrástrala para moverla.')}
         </p>
@@ -222,7 +266,7 @@ export function Organizar({
               arrastre?.destino === i && arrastre.id !== f.id ? 'destino' : '',
             ].join(' ')}
             aria-pressed={marcadas.has(f.id)}
-            aria-label={`Hoja ${i + 1}, página ${f.pagina + 1} del original${f.giro ? `, girada ${f.giro}°` : ''}`}
+            aria-label={`Hoja ${i + 1}${fotos ? '' : `, página ${f.pagina + 1} del original`}${f.giro ? `, girada ${f.giro}°` : ''}`}
             style={unir ? { borderBottomColor: color(f) } : undefined}
             onClick={() => {
               if (!arrastrando.current) alternar(f.id)
@@ -269,7 +313,7 @@ export function Organizar({
             </span>
             <span className="ficha-numero">
               {i + 1}
-              {(unir || f.pagina !== i) && <small> (pág. {f.pagina + 1})</small>}
+              {!fotos && (unir || f.pagina !== i) && <small> (pág. {f.pagina + 1})</small>}
             </span>
           </button>
         ))}
@@ -292,13 +336,35 @@ export function Organizar({
             <button onClick={() => mover(1)} aria-label="Mover después" title="Mover después">
               ▶
             </button>
+            {fotos && onRecortar && marcadasEnOrden.length === 1 && (
+              <button
+                onClick={() => {
+                  onRecortar(marcadasEnOrden[0].archivo)
+                  setMarcadas(new Set())
+                }}
+              >
+                Recortar
+              </button>
+            )}
             <button onClick={girar}>Girar</button>
             <button onClick={duplicar}>Duplicar</button>
             <button onClick={quitar}>Quitar</button>
-            <button onClick={() => onGuardar(hojas(marcadasEnOrden), true)} disabled={guardando}>
-              Extraer
-            </button>
+            {!fotos && (
+              <button onClick={() => onGuardar(hojas(marcadasEnOrden), true, diseno)} disabled={guardando}>
+                Extraer
+              </button>
+            )}
             <button onClick={() => setMarcadas(new Set())}>Desmarcar</button>
+          </>
+        ) : fotos ? (
+          <>
+            {elegirFotos(false)}
+            {android && elegirFotos(true)}
+            <select className="organizar-opcion" value={diseno} onChange={(e) => setDiseno(e.target.value as Diseno)} aria-label="Diseño">
+              <option value="a4">Una por hoja A4</option>
+              <option value="foto">Una por hoja, tamaño de la foto</option>
+              <option value="documentos">Cédula y papeleta (tamaño real)</option>
+            </select>
           </>
         ) : unir ? (
           <>
@@ -312,8 +378,8 @@ export function Organizar({
         ) : (
           <span className="organizar-cuenta">Marca hojas para moverlas, girarlas, quitarlas o extraerlas.</span>
         )}
-        <button className="grande" onClick={() => onGuardar(hojas(lista), false)} disabled={guardando || !lista.length}>
-          {guardando ? 'Guardando…' : unir ? 'Unir' : 'Guardar copia'}
+        <button className="grande" onClick={() => onGuardar(hojas(lista), false, diseno)} disabled={guardando || !lista.length}>
+          {guardando ? 'Guardando…' : unir ? 'Unir' : fotos ? 'Crear PDF' : 'Guardar copia'}
         </button>
       </div>
     </div>
