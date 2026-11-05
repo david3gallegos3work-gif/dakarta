@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { FOTO_ENTERA, arrastrarRecorte, type Agarre, type Recorte } from './fotos.ts'
 
-const ESQUINAS: Agarre[] = ['ai', 'ad', 'bi', 'bd']
-
-/** Recortar una foto al borde del documento: un recuadro con cuatro esquinas que se arrastran. */
+/**
+ * Recortar una foto al borde del documento: cuatro esquinas que se mueven libres. Si la foto se tomó
+ * torcida o de medio lado, al guardarla el documento se endereza a un rectángulo.
+ */
 export function Recortar({
   archivo,
   inicial,
@@ -29,7 +30,7 @@ export function Recortar({
     return () => URL.revokeObjectURL(u)
   }, [archivo])
 
-  // La foto ocupa lo más que puede de la zona, sin deformarse.
+  // La foto ocupa lo más que puede de la zona, sin deformarse (con lugar para las esquinas).
   useEffect(() => {
     const el = zonaRef.current
     if (!el) return
@@ -56,20 +57,16 @@ export function Recortar({
   const soltar = () => {
     agarre.current = null
   }
-  const pct = (v: number) => `${v * 100}%`
+  const figura = r.map((p) => `${p.x},${p.y}`).join(' ')
+  const eventos = { onPointerMove: mover, onPointerUp: soltar, onPointerCancel: soltar }
 
   return (
     <div className="recortar" role="dialog" aria-modal="true" aria-label="Recortar foto">
-      <p className="organizar-ayuda">Arrastra las esquinas hasta el borde del documento. Arrastra el recuadro para moverlo.</p>
+      <p className="organizar-ayuda">
+        Lleva cada esquina a la esquina del documento. Si salió torcido o de lado, se endereza solo.
+      </p>
       <div className="recortar-zona" ref={zonaRef}>
-        <div
-          ref={foto}
-          className="recortar-foto"
-          style={tamano}
-          onPointerMove={mover}
-          onPointerUp={soltar}
-          onPointerCancel={soltar}
-        >
+        <div ref={foto} className="recortar-foto" style={tamano}>
           {url && (
             <img
               src={url}
@@ -79,25 +76,21 @@ export function Recortar({
             />
           )}
           {proporcion > 0 && (
-            <div
-              className="recortar-cuadro"
-              style={{ left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h) }}
-              onPointerDown={empezar('todo')}
-              onPointerMove={mover}
-              onPointerUp={soltar}
-              onPointerCancel={soltar}
-            >
-              {ESQUINAS.map((q) => (
+            <>
+              <svg className="recortar-marco" viewBox="0 0 1 1" preserveAspectRatio="none">
+                <path d={`M0,0H1V1H0Z M${figura.replaceAll(' ', ' L')}Z`} fillRule="evenodd" className="recortar-sombra" />
+                <polygon points={figura} className="recortar-figura" onPointerDown={empezar('todo')} {...eventos} />
+              </svg>
+              {r.map((p, i) => (
                 <span
-                  key={q}
-                  className={`recortar-esquina ${q}`}
-                  onPointerDown={empezar(q)}
-                  onPointerMove={mover}
-                  onPointerUp={soltar}
-                  onPointerCancel={soltar}
+                  key={i}
+                  className="recortar-esquina"
+                  style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}
+                  onPointerDown={empezar(i as Agarre)}
+                  {...eventos}
                 />
               ))}
-            </div>
+            </>
           )}
         </div>
       </div>
