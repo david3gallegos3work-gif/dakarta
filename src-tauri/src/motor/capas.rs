@@ -3,7 +3,7 @@
 use super::*;
 
 /// Enlaces de una página que llevan a otra página del mismo PDF. Los que van a internet se ignoran.
-pub(super) fn enlaces_de(doc: &Document, n: i32) -> Result<Vec<Enlace>, String> {
+pub(super) fn enlaces_de(doc: &PdfDocument, n: i32) -> Result<Vec<Enlace>, String> {
     let pagina = doc.load_page(n).map_err(texto)?;
     let caja = pagina.bounds().map_err(texto)?;
     if caja.width() <= 0.0 || caja.height() <= 0.0 {
@@ -30,7 +30,7 @@ pub(super) fn enlaces_de(doc: &Document, n: i32) -> Result<Vec<Enlace>, String> 
 }
 
 /// Palabras de una página con su caja, para la capa que permite seleccionar y copiar.
-pub(super) fn palabras_de(doc: &Document, n: i32) -> Result<Vec<Palabra>, String> {
+pub(super) fn palabras_de(doc: &PdfDocument, n: i32) -> Result<Vec<Palabra>, String> {
     let pagina = doc.load_page(n).map_err(texto)?;
     let caja = pagina.bounds().map_err(texto)?;
     if caja.width() <= 0.0 || caja.height() <= 0.0 {

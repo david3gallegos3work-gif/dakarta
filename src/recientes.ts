@@ -1,9 +1,7 @@
 export type Reciente = { ruta: string; nombre: string }
 
 const CLAVE = 'recientes'
-/** Se recuerdan varios para poder mostrar los últimos 3 de cada tipo. */
-export const MAX_RECIENTES = 30
-export const POR_TIPO = 3
+export const MAX_RECIENTES = 10
 
 /**
  * Nombre para mostrar. Cuando Android no da el nombre, se saca del enlace y queda como
@@ -19,30 +17,6 @@ export function nombreLegible(nombre: string): string {
   // Los dos puntos solo separan carpetas en un enlace cifrado («primary:Download/…»); un nombre real puede tenerlos.
   const separadores = n === nombre ? /[/\\]/ : /[/\\:]/
   return n.split(separadores).filter(Boolean).pop() || nombre
-}
-
-type Grupo = { clave: string; titulo: string; extensiones: string[] }
-const GRUPOS: Grupo[] = [
-  { clave: 'pdf', titulo: 'PDF', extensiones: ['pdf'] },
-  { clave: 'word', titulo: 'Word', extensiones: ['docx', 'doc'] },
-  { clave: 'excel', titulo: 'Excel', extensiones: ['xlsx', 'xls'] },
-  { clave: 'powerpoint', titulo: 'PowerPoint', extensiones: ['pptx', 'ppt'] },
-  { clave: 'libros', titulo: 'Libros', extensiones: ['epub', 'mobi', 'fb2', 'cbz'] },
-  { clave: 'texto', titulo: 'Texto', extensiones: ['txt', 'text', 'log', 'htm', 'html', 'xhtml'] },
-  { clave: 'imagenes', titulo: 'Imágenes', extensiones: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tif', 'tiff'] },
-]
-const OTROS: Grupo = { clave: 'otros', titulo: 'Otros', extensiones: [] }
-
-function grupoDe(nombre: string): Grupo {
-  const ext = nombreLegible(nombre).split('.').pop()?.toLowerCase() ?? ''
-  return GRUPOS.find((g) => g.extensiones.includes(ext)) ?? OTROS
-}
-
-/** Los últimos `POR_TIPO` de cada tipo, en el orden de los grupos (PDF, Word…); solo los que tienen algo. */
-export function porTipo(lista: Reciente[]): { titulo: string; recientes: Reciente[] }[] {
-  return [...GRUPOS, OTROS]
-    .map((g) => ({ titulo: g.titulo, recientes: lista.filter((r) => grupoDe(r.nombre) === g).slice(0, POR_TIPO) }))
-    .filter((g) => g.recientes.length > 0)
 }
 
 /** El más nuevo primero; si ya estaba, se mueve al inicio. */

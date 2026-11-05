@@ -30,8 +30,6 @@ export type Info = {
   alto: number
   indice: Entrada[]
   ms: number
-  /** Solo un PDF se puede anotar, organizar y guardar; Word, EPUB, TXT… son para leer. */
-  pdf: boolean
   /** Para volver a abrirlo después: una ruta en Windows, un content:// en Android. */
   ruta: string
   nombre: string
