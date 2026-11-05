@@ -1499,15 +1499,20 @@ export default function App() {
             {recientes.length > 0 && (
               <div className="recientes-panel">
                 <h2>Últimos archivos</h2>
-                <ul>
-                  {recientes.slice(0, 4).map((r) => (
-                    <li key={r.ruta}>
-                      <button onClick={() => abrirReciente(r)} disabled={abriendo} title={r.nombre}>
-                        {r.nombre}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                {porTipo(recientes).map((g) => (
+                  <section key={g.titulo} className="recientes-tipo">
+                    <h3>{g.titulo}</h3>
+                    <ul>
+                      {g.recientes.map((r) => (
+                        <li key={r.ruta}>
+                          <button onClick={() => abrirReciente(r)} disabled={abriendo} title={r.nombre}>
+                            {r.nombre}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ))}
               </div>
             )}
             {doc.info.indice.length ? (
