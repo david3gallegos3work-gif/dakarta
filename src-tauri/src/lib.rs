@@ -17,10 +17,11 @@ fn archivo_inicial(inicial: State<'_, Inicial>) -> Option<String> {
 }
 
 /// "Abrir con Dakarta": en Windows llega una ruta; en Android, un content://.
+/// `clave`: la contraseña del PDF, si la pidió (el error `CLAVE:PIDE` o `CLAVE:MAL` dice que hace falta).
 #[tauri::command]
-async fn abrir_ruta(app: AppHandle, motor: State<'_, Motor>, ruta: String) -> Result<Info, String> {
+async fn abrir_ruta(app: AppHandle, motor: State<'_, Motor>, ruta: String, clave: Option<String>) -> Result<Info, String> {
     let ruta = ruta.parse::<FilePath>().map_err(|e| e.to_string())?;
-    abrir(&app, &motor, ruta)
+    abrir(&app, &motor, ruta, clave)
 }
 
 /// Abre en el navegador la descarga de una versión nueva; solo las de Dakarta.
@@ -185,11 +186,17 @@ async fn deshacer_todo(motor: State<'_, Motor>) -> Result<bool, String> {
 }
 
 /// Android: deja la copia editada en la caché; la app la copia al destino elegido por el usuario.
+/// `proteccion`: una contraseña nueva para la copia, o vacía para guardarla sin contraseña.
 #[tauri::command]
-async fn guardar_en_cache(app: AppHandle, motor: State<'_, Motor>, hojas: Option<Vec<Hoja>>) -> Result<String, String> {
+async fn guardar_en_cache(
+    app: AppHandle,
+    motor: State<'_, Motor>,
+    hojas: Option<Vec<Hoja>>,
+    proteccion: Option<String>,
+) -> Result<String, String> {
     let copia = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("copia.pdf");
     let ruta = copia.to_string_lossy().into_owned();
-    motor.guardar(ruta.clone(), hojas)?;
+    motor.guardar(ruta.clone(), hojas, proteccion)?;
     Ok(ruta)
 }
 
@@ -200,13 +207,14 @@ async fn guardar_copia(
     motor: State<'_, Motor>,
     nombre: String,
     hojas: Option<Vec<Hoja>>,
+    proteccion: Option<String>,
 ) -> Result<Option<String>, String> {
     let Some(ruta) = app.dialog().file().set_file_name(nombre).add_filter("PDF", &["pdf"]).blocking_save_file() else {
         return Ok(None);
     };
     let ruta = ruta.into_path().map_err(|e| e.to_string())?;
     let destino = ruta.to_string_lossy().into_owned();
-    motor.guardar(destino.clone(), hojas)?;
+    motor.guardar(destino.clone(), hojas, proteccion)?;
     Ok(Some(destino))
 }
 
@@ -216,12 +224,13 @@ fn mostrar_archivo(app: AppHandle, ruta: String) -> Result<(), String> {
     app.opener().reveal_item_in_dir(ruta).map_err(|e| e.to_string())
 }
 
+/// Windows: pregunta qué PDF abrir y devuelve su ruta; la pantalla lo abre (y pide la contraseña si tiene).
 #[tauri::command]
-async fn elegir_pdf(app: AppHandle, motor: State<'_, Motor>) -> Result<Option<Info>, String> {
+async fn elegir_pdf(app: AppHandle) -> Result<Option<String>, String> {
     let Some(ruta) = app.dialog().file().add_filter("PDF", &["pdf"]).blocking_pick_file() else {
         return Ok(None);
     };
-    abrir(&app, &motor, ruta).map(Some)
+    Ok(Some(ruta.into_path().map_err(|e| e.to_string())?.to_string_lossy().into_owned()))
 }
 
 /// Lo que el motor necesita para leer un archivo: su ruta, el archivo abierto (Android) y su nombre.
@@ -275,9 +284,9 @@ fn preparar(app: &AppHandle, ruta: FilePath, copia: &str) -> Result<ParaLeer, St
     Ok(ParaLeer { ruta: original.clone(), archivo: None, nombre, original })
 }
 
-fn abrir(app: &AppHandle, motor: &Motor, ruta: FilePath) -> Result<Info, String> {
+fn abrir(app: &AppHandle, motor: &Motor, ruta: FilePath, clave: Option<String>) -> Result<Info, String> {
     let p = preparar(app, ruta, "abierto.pdf")?;
-    let mut info = motor.abrir(p.ruta, p.archivo)?;
+    let mut info = motor.abrir(p.ruta, p.archivo, clave)?;
     info.completar(p.original, p.nombre);
     Ok(info)
 }
@@ -290,24 +299,22 @@ struct Agregado {
     nombre: String,
 }
 
-/// Unir PDFs: abre otro PDF para unirlo. En Android llega la ruta elegida; en Windows se pregunta aquí
-/// (se pueden elegir varios a la vez).
+/// Unir PDFs, Windows: pregunta qué PDFs unir (se pueden elegir varios a la vez) y devuelve sus rutas.
 #[tauri::command]
-async fn abrir_agregado(app: AppHandle, motor: State<'_, Motor>, ruta: Option<String>) -> Result<Vec<Agregado>, String> {
-    let rutas = match ruta {
-        Some(r) => vec![r.parse::<FilePath>().map_err(|e| e.to_string())?],
-        None => app.dialog().file().add_filter("PDF", &["pdf"]).blocking_pick_files().unwrap_or_default(),
-    };
-    let mut lista = Vec::new();
-    for r in rutas {
-        // Cada copia en la caché con su nombre: los PDFs agregados antes siguen leyendo la suya.
-        static SIGUIENTE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let n = SIGUIENTE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let p = preparar(&app, r, &format!("unir-{n}.pdf"))?;
-        let (archivo, paginas) = motor.abrir_agregado(p.ruta, p.archivo)?;
-        lista.push(Agregado { archivo, paginas, nombre: p.nombre });
-    }
-    Ok(lista)
+async fn elegir_pdfs(app: AppHandle) -> Result<Vec<String>, String> {
+    let elegidos = app.dialog().file().add_filter("PDF", &["pdf"]).blocking_pick_files().unwrap_or_default();
+    elegidos.into_iter().map(|r| Ok(r.into_path().map_err(|e| e.to_string())?.to_string_lossy().into_owned())).collect()
+}
+
+/// Unir PDFs: abre otro PDF para unirlo, con su contraseña si la pidió (como `abrir_ruta`).
+#[tauri::command]
+async fn abrir_agregado(app: AppHandle, motor: State<'_, Motor>, ruta: String, clave: Option<String>) -> Result<Agregado, String> {
+    // Cada copia en la caché con su nombre: los PDFs agregados antes siguen leyendo la suya.
+    static SIGUIENTE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = SIGUIENTE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let p = preparar(&app, ruta.parse::<FilePath>().map_err(|e| e.to_string())?, &format!("unir-{n}.pdf"))?;
+    let (archivo, paginas) = motor.abrir_agregado(p.ruta, p.archivo, clave)?;
+    Ok(Agregado { archivo, paginas, nombre: p.nombre })
 }
 
 #[tauri::command]
@@ -328,6 +335,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
     elegir_pdf,
+    elegir_pdfs,
     archivo_inicial,
     abrir_ruta,
     descargar_version,
