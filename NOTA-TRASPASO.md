@@ -2,7 +2,7 @@
 
 **Fecha y lugar:** 2026-11-03 22:20, en la PC. Actualizada el 2026-11-04 (Ecuador) desde la nube.
 **IA y aparato:** Claude Code. Revisión en la PC; arreglos en la nube.
-**Rama:** `main` (versión 0.4.0).
+**Rama:** `main` (versión 0.4.1).
 
 ## Hecho en la nube (2026-11-03 y 2026-11-04)
 
@@ -23,6 +23,7 @@
 - 0.2.14: con la escritura en vivo, una N sola se volvía Ñ (el teclado cerraba la palabra a medias y la corregía). El panel espera a que el teclado termine la palabra (`compositionend`) y el cuadro va con `autoCorrect="off"`. Por comprobar en el celular.
 - 0.3.0 (Fase 3, primera parte): «Organizar páginas» desde el panel ☰: mover (arrastrar o ◀ ▶), girar, quitar, duplicar, extraer, deshacer y guardar copia (se abre la copia organizada). El motor reordena una copia del PDF abierto con sus anotaciones. Pruebas: 21 del motor y 17 de la pantalla.
 - 0.4.0 (Fase 4, primera parte): se abren para leer Word/Excel/PowerPoint, EPUB, MOBI, FB2, TXT, HTML, XPS, CBZ e imágenes (MuPDF con `html, epub, xps, cbz, img`). Anotar y organizar solo en PDF. "Abrir con" en Android y Windows para esos formatos (no para fotos). Pruebas: 23 del motor.
+- 0.4.1: desde Gemini o WhatsApp no salía Dakarta para Word: esas apps entregan los .docx como `application/msword` u `application/octet-stream`. Se registran también esas etiquetas; el motor mira el contenido real. Office antiguo (.doc/.xls/.ppt) da un mensaje claro.
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo

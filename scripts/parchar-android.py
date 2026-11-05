@@ -228,7 +228,10 @@ private val TIPOS_ABRIR = arrayOf(
   "application/oxps",
   "application/vnd.comicbook+zip",
   "application/x-cbz",
-  "text/plain"
+  "text/plain",
+  // Muchas apps (Gemini, WhatsApp…) entregan un Word con estas etiquetas: Dakarta mira el contenido real.
+  "application/msword",
+  "application/octet-stream"
 )
 private const val PEDIDO_GUARDAR = 0x0DA2
 '''
@@ -256,6 +259,8 @@ FILTRO = '''</intent-filter>
                 <data android:mimeType="application/vnd.comicbook+zip" />
                 <data android:mimeType="application/x-cbz" />
                 <data android:mimeType="text/plain" />
+                <data android:mimeType="application/msword" />
+                <data android:mimeType="application/octet-stream" />
             </intent-filter>'''
 if '</intent-filter>' not in m:
     sys.exit('Manifest: no se encontró intent-filter')

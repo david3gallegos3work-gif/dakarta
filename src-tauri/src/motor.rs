@@ -808,6 +808,8 @@ impl Motor {
     }
 }
 
+const OFFICE_ANTIGUO: &str = "Este archivo es de Office antiguo (.doc, .xls o .ppt) y no se puede abrir. Ábrelo en Word o Google Docs y guárdalo como .docx.";
+
 /// Tamaño de hoja para los formatos de texto corrido (Word, EPUB, TXT…): cómodo de leer en el celular.
 const HOJA_LECTURA: (f32, f32, f32) = (420.0, 600.0, 11.0);
 
@@ -821,6 +823,10 @@ fn abrir_doc(ruta: &str, nombre: &str) -> Result<(Abierto, Info), String> {
         }
         Abierto::Pdf(doc)
     } else {
+        // Office de antes de 2007 (.doc, .xls, .ppt): otro formato que MuPDF no lee.
+        if cabecera.starts_with(b"\xD0\xCF\x11\xE0") {
+            return Err(OFFICE_ANTIGUO.into());
+        }
         let tipo = tipo_de(nombre, &cabecera).ok_or("Dakarta todavía no sabe abrir este tipo de archivo.")?;
         let bytes = std::fs::read(ruta).map_err(|e| format!("No se pudo abrir este archivo: {e}"))?;
         let mut doc = Document::from_bytes(&bytes, tipo).map_err(|e| format!("No se pudo abrir este archivo: {e}"))?;
