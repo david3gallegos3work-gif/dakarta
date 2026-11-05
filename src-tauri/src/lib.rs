@@ -326,14 +326,40 @@ fn fotos_vaciar(fotos: State<'_, Fotos>) {
     fotos.0.lock().expect("fotos").clear();
 }
 
-/// Agrega la siguiente foto (llega como bytes, sin pasar a texto).
+/// Agrega la siguiente foto. En Windows llega como bytes; en Android Tauri la manda como una lista de
+/// números (su IPC allí solo lleva texto).
 #[tauri::command]
 fn fotos_agregar(pedido: tauri::ipc::Request<'_>, fotos: State<'_, Fotos>) -> Result<(), String> {
-    let tauri::ipc::InvokeBody::Raw(jpg) = pedido.body() else {
-        return Err("La foto no llegó bien.".into());
-    };
-    fotos.0.lock().expect("fotos").push(jpg.clone());
+    let jpg = bytes_de(pedido.body())?;
+    fotos.0.lock().expect("fotos").push(jpg);
     Ok(())
+}
+
+fn bytes_de(cuerpo: &tauri::ipc::InvokeBody) -> Result<Vec<u8>, String> {
+    let bytes = match cuerpo {
+        tauri::ipc::InvokeBody::Raw(b) => b.clone(),
+        tauri::ipc::InvokeBody::Json(v) => {
+            <Vec<u8> as serde::Deserialize>::deserialize(v.clone()).map_err(|_| "La foto no llegó bien.".to_string())?
+        }
+    };
+    if bytes.is_empty() {
+        return Err("La foto no llegó bien.".into());
+    }
+    Ok(bytes)
+}
+
+#[cfg(test)]
+mod pruebas_ipc {
+    use tauri::ipc::InvokeBody;
+
+    #[test]
+    fn la_foto_llega_como_bytes_o_como_lista_de_numeros() {
+        assert_eq!(super::bytes_de(&InvokeBody::Raw(vec![255, 216, 255])).unwrap(), [255, 216, 255]);
+        // Así la manda Tauri en Android.
+        assert_eq!(super::bytes_de(&InvokeBody::Json(serde_json::json!([255, 216, 255]))).unwrap(), [255, 216, 255]);
+        assert!(super::bytes_de(&InvokeBody::Json(serde_json::json!({ "a": 1 }))).is_err());
+        assert!(super::bytes_de(&InvokeBody::Json(serde_json::json!([]))).is_err());
+    }
 }
 
 fn armar_fotos(fotos: &Fotos, diseno: Diseno, destino: &str) -> Result<(), String> {
