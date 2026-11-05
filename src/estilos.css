@@ -278,3 +278,7 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .recortar-esquina { position: absolute; width: 44px; height: 44px; transform: translate(-50%, -50%); touch-action: none; cursor: grab; }
 .recortar-esquina::after { content: ''; position: absolute; inset: 12px; border-radius: 50%; background: rgba(21, 101, 192, 0.35); border: 3px solid #fff; box-shadow: 0 0 3px #000; }
 .recortar .organizar-acciones { color: #1a1a1a; }
+.organizar-diseno { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #fff; border-bottom: 1px solid #cfd8e3; font-size: 15px; font-weight: 600; }
+.organizar-diseno select { flex: 1; min-width: 0; min-height: 40px; padding: 0 8px; border: 1px solid #9fb3c8; border-radius: 8px; background: #fff; color: inherit; font: inherit; font-weight: 400; }
+.noche .organizar-diseno { background: #242424; border-color: #3a3a3a; }
+.noche .organizar-diseno select { background: #2f2f2f; border-color: #555; }

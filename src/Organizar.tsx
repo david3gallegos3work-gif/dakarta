@@ -244,6 +244,16 @@ export function Organizar({
               : 'Toca las hojas para marcarlas. Mantén presionada una y arrástrala para moverla.')}
         </p>
       )}
+      {fotos && (
+        <label className="organizar-diseno">
+          Diseño:
+          <select value={diseno} onChange={(e) => setDiseno(e.target.value as Diseno)}>
+            <option value="a4">Una foto por hoja A4</option>
+            <option value="foto">Una foto por hoja, tamaño de la foto</option>
+            <option value="documentos">Cédula y papeleta (tamaño real)</option>
+          </select>
+        </label>
+      )}
       {unir && fuentes.length > 0 && (
         <ul className="organizar-archivos">
           {fuentes.map((f, i) => (
@@ -360,11 +370,6 @@ export function Organizar({
           <>
             {elegirFotos(false)}
             {android && elegirFotos(true)}
-            <select className="organizar-opcion" value={diseno} onChange={(e) => setDiseno(e.target.value as Diseno)} aria-label="Diseño">
-              <option value="a4">Una por hoja A4</option>
-              <option value="foto">Una por hoja, tamaño de la foto</option>
-              <option value="documentos">Cédula y papeleta (tamaño real)</option>
-            </select>
           </>
         ) : unir ? (
           <>
