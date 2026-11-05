@@ -2,6 +2,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import logo from '../assets/logo.jpg'
 import { AcercaDe } from './AcercaDe.tsx'
+import { CuadroClave, type PideClave } from './Clave.tsx'
+import { CLAVE_MAL, esErrorClave } from './clave.ts'
 import {
   clamp01,
   COLORES_FUERTES,
@@ -129,6 +131,7 @@ export default function App() {
   const [hechas, setHechas] = useState(0)
   const [avisoEdicion, setAvisoEdicion] = useState(false)
   const [pregunta, setPregunta] = useState<Pregunta | null>(null)
+  const [pideClave, setPideClave] = useState<PideClave | null>(null)
   const [verAcerca, setVerAcerca] = useState(false)
   // Pantalla de organizar páginas (un PDF) o de unir PDFs, con los PDFs cuyas hojas muestra al abrirse.
   const [organizar, setOrganizar] = useState<{ unir: boolean; fuentes: Fuente[] } | null>(null)
@@ -545,13 +548,17 @@ export default function App() {
     [busqueda, coincidencia, irA],
   )
 
-  async function cargar(pedido: Promise<Info | null>, reciente?: Reciente) {
+  /**
+   * Abre un PDF. `pedir` lo pide al motor con la contraseña (`undefined` la primera vez): si el PDF la
+   * pide, sale el cuadro para escribirla y se vuelve a pedir con ella.
+   */
+  async function cargar(pedir: (clave?: string) => Promise<Info | null>, reciente?: Reciente, clave?: string) {
     setAbriendo(true)
     setError('')
     marcarAbriendo(true)
     let abierto = false
     try {
-      const info = await pedido
+      const info = await pedir(clave)
       if (info) {
         abierto = true
         setDoc((d) => ({ info, id: (d?.id ?? 0) + 1 }))
@@ -596,6 +603,17 @@ export default function App() {
         setRecientes((lista) => guardarReciente(lista, { ruta: info.ruta, nombre }))
       }
     } catch (e) {
+      if (esErrorClave(e)) {
+        const nombre = reciente?.nombre
+        setPideClave({
+          titulo: 'Este PDF tiene contraseña',
+          texto: nombre ? `Escribe la contraseña para abrir «${nombre}».` : 'Escribe la contraseña para abrirlo.',
+          mal: String(e) === CLAVE_MAL,
+          boton: 'Abrir',
+          alListo: (c) => void cargar(pedir, reciente, c),
+        })
+        return
+      }
       console.error(e)
       setError(reciente ? `No se pudo abrir «${reciente.nombre}». Ábrelo otra vez con «Abrir».` : 'No se pudo abrir el archivo. Inténtalo otra vez con «Abrir».')
       if (reciente) setRecientes((lista) => olvidarReciente(lista, reciente.ruta))
@@ -629,11 +647,24 @@ export default function App() {
       puente.elegir()
       return
     }
-    siPuedeCambiar(() => cargar(invoke<Info | null>('elegir_pdf')))
+    siPuedeCambiar(() => {
+      invoke<string | null>('elegir_pdf')
+        .then((ruta) => {
+          if (ruta) void abrirEn(ruta)
+        })
+        .catch((e) => {
+          console.error(e)
+          setError('No se pudo abrir el archivo. Inténtalo otra vez con «Abrir».')
+        })
+    })
   }
 
+  /** Abre el PDF de esa ruta (pidiendo la contraseña si tiene). */
+  const abrirEn = (ruta: string, reciente?: Reciente, clave?: string) =>
+    cargar((c) => invoke<Info>('abrir_ruta', { ruta, clave: c }), reciente, clave)
+
   const abrirReciente = (r: Reciente) => {
-    siPuedeCambiar(() => cargar(invoke<Info>('abrir_ruta', { ruta: r.ruta }), r))
+    siPuedeCambiar(() => abrirEn(r.ruta, r))
   }
 
   const entrarEditar = () => {
@@ -923,6 +954,26 @@ export default function App() {
     [refrescar, fallo],
   )
 
+  const girarAnotacion = useCallback(
+    (a: Anotacion, grados: number) => {
+      invoke('girar_anotacion', { pagina: a.pagina, xref: a.xref, grados })
+        .then(async () => {
+          refrescar(a.pagina)
+          setSucio(true)
+          setHechas((n) => n + 1)
+          // Girada, la caja cambia de forma: sigue elegida con su caja nueva para poder seguir girándola.
+          const lista = await invoke<Anotacion[]>('anotaciones', { pagina: a.pagina })
+          setAnots((m) => ({ ...m, [a.pagina]: lista }))
+          setSeleccion((s) => (s && s.xref === a.xref ? (lista.find((x) => x.xref === a.xref) ?? null) : s))
+        })
+        .catch((e) => {
+          fallo(e)
+          refrescar(a.pagina)
+        })
+    },
+    [refrescar, fallo],
+  )
+
   const borrarAnotacion = useCallback(
     async (a: Anotacion) => {
       try {
@@ -981,10 +1032,32 @@ export default function App() {
     invoke('cerrar_agregados').catch(() => {})
   }, [])
 
+  /** Unir PDFs: abre en el motor un PDF elegido, pidiendo su contraseña si tiene. Sin él, `null`. */
+  const abrirAgregado = async (ruta: string, nombre: string, clave?: string): Promise<Fuente | null> => {
+    try {
+      const f = await invoke<Fuente>('abrir_agregado', { ruta, clave })
+      return { ...f, nombre: nombreLegible(nombre || f.nombre) }
+    } catch (e) {
+      if (!esErrorClave(e)) throw e
+      const legible = nombreLegible(nombre || ruta.split(/[\\/]/).pop() || '')
+      return new Promise((listo) =>
+        setPideClave({
+          titulo: 'Este PDF tiene contraseña',
+          texto: legible ? `Escribe la contraseña de «${legible}» para unirlo.` : 'Escribe la contraseña para unirlo.',
+          mal: String(e) === CLAVE_MAL,
+          boton: 'Unir',
+          alListo: (c) => void abrirAgregado(ruta, nombre, c).then(listo, () => listo(null)),
+          alCancelar: () => listo(null),
+        }),
+      )
+    }
+  }
+
   /** Unir PDFs: pide uno o más PDFs y los abre en el motor junto al abierto. */
   const agregarPdf = async (): Promise<Fuente[]> => {
     try {
       const puente = window.DakartaAndroid
+      let elegidos: { ruta: string; nombre: string }[]
       if (puente?.elegir) {
         const ruta = await new Promise<string | null>((listo) => {
           esperandoAgregado.current = listo
@@ -992,17 +1065,22 @@ export default function App() {
           puente.elegir!()
         })
         if (!ruta) return []
-        const lista = await invoke<Fuente[]>('abrir_agregado', { ruta })
         let nombre = ''
         try {
           nombre = puente.nombre(ruta) ?? ''
         } catch {
           // sin nombre de Android: queda el que se sacó de la ruta
         }
-        return lista.map((f) => ({ ...f, nombre: nombreLegible(nombre || f.nombre) }))
+        elegidos = [{ ruta, nombre }]
+      } else {
+        elegidos = (await invoke<string[]>('elegir_pdfs')).map((ruta) => ({ ruta, nombre: '' }))
       }
-      const lista = await invoke<Fuente[]>('abrir_agregado', {})
-      return lista.map((f) => ({ ...f, nombre: nombreLegible(f.nombre) }))
+      const lista: Fuente[] = []
+      for (const { ruta, nombre } of elegidos) {
+        const f = await abrirAgregado(ruta, nombre)
+        if (f) lista.push(f)
+      }
+      return lista
     } catch (e) {
       console.error(e)
       setError('No se pudo abrir ese PDF para unirlo.')
@@ -1012,12 +1090,14 @@ export default function App() {
 
   /**
    * Guarda una copia. Con `organizar`, la copia lleva esas hojas en ese orden: al organizar se abre la
-   * copia nueva; al extraer se sigue en el PDF de siempre.
+   * copia nueva; al extraer se sigue en el PDF de siempre. Con `proteccion` (una contraseña, o vacía para
+   * quitarla) la copia sale con esa contraseña o sin ninguna, y se sigue en ella.
    */
-  const guardarCopia = async (organizar?: { hojas: Hoja[]; extraer: boolean; unir: boolean }) => {
+  const guardarCopia = async (organizar?: { hojas: Hoja[]; extraer: boolean; unir: boolean }, proteccion?: string) => {
     if ((!doc && !organizar?.unir) || guardando) return
     const base = (doc ? nombreActual || doc.info.nombre : 'PDFs').replace(/\.pdf$/i, '')
-    const sufijo = !organizar ? 'anotado' : organizar.extraer ? 'páginas' : organizar.unir ? 'unido' : 'organizado'
+    const sufijo =
+      proteccion !== undefined ? (proteccion ? 'con contraseña' : 'sin contraseña') : !organizar ? 'anotado' : organizar.extraer ? 'páginas' : organizar.unir ? 'unido' : 'organizado'
     const nombre = `${base || 'Documento'} (${sufijo}).pdf`
     const hojas = organizar?.hojas
     setGuardando(true)
@@ -1029,14 +1109,14 @@ export default function App() {
         if (!destino) return
         const elegido = destino
         // Si el motor no logra escribir la copia, el archivo vacío que se creó en el destino no se queda.
-        const cache = await invoke<string>('guardar_en_cache', { hojas }).catch((e) => {
+        const cache = await invoke<string>('guardar_en_cache', { hojas, proteccion }).catch((e) => {
           puente.borrar?.(elegido)
           throw e
         })
         if (!puente.copiar(destino, cache)) throw new Error('No se pudo guardar la copia.')
         puente.persistir(destino)
       } else {
-        destino = await invoke<string | null>('guardar_copia', { nombre, hojas })
+        destino = await invoke<string | null>('guardar_copia', { nombre, hojas, proteccion })
         if (!destino) return
       }
       const guardada = destino
@@ -1049,8 +1129,14 @@ export default function App() {
         } else {
           // Ningún PDF cambió: se abre el nuevo (organizado o unido) para seguir en él.
           cerrarOrganizar()
-          cargar(invoke<Info>('abrir_ruta', { ruta: guardada }), { ruta: guardada, nombre: nombreDestino })
+          abrirEn(guardada, { ruta: guardada, nombre: nombreDestino })
         }
+        return
+      }
+      if (proteccion !== undefined) {
+        // Se sigue en la copia nueva, abierta con su contraseña (o sin ninguna).
+        abrirEn(guardada, { ruta: guardada, nombre: nombreDestino }, proteccion || undefined)
+        setExito(proteccion ? 'Copia con contraseña guardada' : 'Copia sin contraseña guardada')
         return
       }
       setRutaActual(guardada)
@@ -1111,6 +1197,11 @@ export default function App() {
         setPregunta(null)
         return true
       }
+      if (pideClave) {
+        setPideClave(null)
+        pideClave.alCancelar?.()
+        return true
+      }
       if (verAcerca) {
         setVerAcerca(false)
         return true
@@ -1144,7 +1235,7 @@ export default function App() {
     return () => {
       delete window.DakartaAtras
     }
-  }, [verIndice, verBuscar, cerrarBuscar, sucio, pregunta, verAcerca, organizar, cerrarOrganizar])
+  }, [verIndice, verBuscar, cerrarBuscar, sucio, pregunta, pideClave, verAcerca, organizar, cerrarOrganizar])
 
   // Windows: avisar antes de cerrar la ventana si hay cambios sin guardar.
   useEffect(() => {
@@ -1178,7 +1269,7 @@ export default function App() {
     let llegoArchivo = false
     const abrirRuta = (ruta: string, reciente?: Reciente) => {
       llegoArchivo = true
-      cargar(invoke<Info>('abrir_ruta', { ruta }), reciente)
+      abrirEn(ruta, reciente)
     }
     const pendiente = () => {
       const ruta = window.DakartaAndroid?.pendiente()
@@ -1587,6 +1678,38 @@ export default function App() {
             >
               Unir con otros PDFs
             </button>
+            <button
+              className="version-indice"
+              onClick={() => {
+                setVerIndice(false)
+                setPideClave({
+                  titulo: doc.info.con_clave ? 'Cambiar la contraseña' : 'Proteger con contraseña',
+                  texto: 'Se guarda una copia que pide esta contraseña para abrirse. El PDF de ahora no cambia.',
+                  nueva: true,
+                  boton: 'Guardar copia',
+                  alListo: (c) => void guardarCopia(undefined, c),
+                })
+              }}
+            >
+              {doc.info.con_clave ? 'Cambiar la contraseña' : 'Proteger con contraseña'}
+            </button>
+            {doc.info.con_clave && (
+              <button
+                className="version-indice"
+                onClick={() => {
+                  setVerIndice(false)
+                  setPregunta({
+                    titulo: 'Quitar la contraseña',
+                    texto: 'Se guarda una copia que se abre sin contraseña. El PDF de ahora no cambia.',
+                    si: 'Guardar copia',
+                    no: 'Cancelar',
+                    alSi: () => void guardarCopia(undefined, ''),
+                  })
+                }}
+              >
+                Quitar la contraseña
+              </button>
+            )}
             <button className="version-indice" onClick={() => setVerAcerca(true)}>
               Dakarta · versión y descargas
             </button>
@@ -1728,6 +1851,7 @@ export default function App() {
                 onSeleccionar={seleccionarAnotacion}
                 onMover={moverAnotacion}
                 onRedimensionar={redimensionarAnotacion}
+                onGirar={girarAnotacion}
                 palabras={seleccionTexto ? palabras : undefined}
                 enlaces={!editando && !seleccionTexto ? enlaces : undefined}
                 onEnlace={ir}
@@ -1853,6 +1977,8 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {pideClave && <CuadroClave key={String(pideClave.mal)} pedido={pideClave} onCerrar={() => setPideClave(null)} />}
 
       {pregunta && (
         <div className="fondo-aviso" role="dialog" aria-modal="true" aria-labelledby="titulo-pregunta">

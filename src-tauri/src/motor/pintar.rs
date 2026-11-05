@@ -5,8 +5,45 @@ use super::*;
 /// Se escribe primero a un archivo aparte y solo al terminar reemplaza al destino:
 /// si algo falla a medias, el archivo que ya existía queda intacto.
 pub(super) fn guardar_doc(doc: &PdfDocument, destino: &str) -> Result<(), String> {
+    guardar_doc_con(doc, destino, &Proteccion::Igual)
+}
+
+/// La contraseña de la copia: la misma del original (o ninguna si no tenía), una nueva o ninguna.
+pub(super) enum Proteccion {
+    Igual,
+    Poner(String),
+    Quitar,
+}
+
+impl Proteccion {
+    /// Lo que pide la pantalla: una contraseña nueva, o vacía para quitarla.
+    pub(super) fn de(clave: &str) -> Result<Self, String> {
+        if clave.is_empty() {
+            return Ok(Proteccion::Quitar);
+        }
+        // El PDF guarda hasta 127 bytes de contraseña.
+        if clave.len() > 127 {
+            return Err("La contraseña es demasiado larga.".into());
+        }
+        Ok(Proteccion::Poner(clave.to_string()))
+    }
+}
+
+pub(super) fn guardar_doc_con(doc: &PdfDocument, destino: &str, proteccion: &Proteccion) -> Result<(), String> {
     let mut opciones = PdfWriteOptions::default();
     opciones.set_compress(true);
+    match proteccion {
+        // Por omisión MuPDF conserva el cifrado (y la contraseña) que el PDF ya tenía.
+        Proteccion::Igual => {}
+        Proteccion::Poner(clave) => {
+            opciones.set_encryption(Encryption::Aes256);
+            opciones.set_user_password(clave);
+            opciones.set_owner_password(clave);
+        }
+        Proteccion::Quitar => {
+            opciones.set_encryption(Encryption::None);
+        }
+    }
     // Quita del archivo lo que ya no se usa (como una anotación borrada): no queda escondido en la copia.
     opciones.set_garbage_level(1);
     let temporal = format!("{destino}.guardando");

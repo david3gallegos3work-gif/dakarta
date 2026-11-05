@@ -32,21 +32,22 @@ const COPIAR: [&str; 9] = ["Contents", "Resources", "MediaBox", "CropBox", "Blee
 /// Se parte de una copia del primero que aparece y se le agregan las hojas de los demás con sus
 /// anotaciones; las casillas de formulario solo se conservan las del primero.
 pub(super) fn unir_y_guardar(
-    abierto: Option<&PdfDocument>,
-    agregados: &[&PdfDocument],
+    abierto: Option<(&PdfDocument, Option<&str>)>,
+    agregados: &[(&PdfDocument, Option<&str>)],
     hojas: &[Hoja],
     destino: &str,
 ) -> Result<(), String> {
     if hojas.is_empty() {
         return Err("No quedó ninguna página para guardar.".into());
     }
-    let fuente = |a: i32| -> Result<&PdfDocument, String> {
+    let fuente_y_clave = |a: i32| -> Result<(&PdfDocument, Option<&str>), String> {
         if a == ABIERTO {
             abierto.ok_or_else(|| "No hay un documento abierto".into())
         } else {
             usize::try_from(a).ok().and_then(|i| agregados.get(i).copied()).ok_or_else(|| "Falta uno de los PDFs para unir.".into())
         }
     };
+    let fuente = |a: i32| fuente_y_clave(a).map(|(d, _)| d);
     let mut orden: Vec<i32> = Vec::new();
     for h in hojas {
         let total = fuente(h.archivo)?.page_count().map_err(texto)?;
@@ -59,7 +60,8 @@ pub(super) fn unir_y_guardar(
     }
     let temporal = format!("{destino}.uniendo");
     guardar_doc(fuente(orden[0])?, &temporal)?;
-    let r = PdfDocument::open(&temporal).map_err(texto).and_then(|mut copia| {
+    // El unido parte de una copia del primero, con su contraseña si la tenía.
+    let r = abrir_pdf(&temporal, fuente_y_clave(orden[0])?.1).and_then(|mut copia| {
         let mut inicio = HashMap::from([(orden[0], 0)]);
         for &a in &orden[1..] {
             inicio.insert(a, copia.page_count().map_err(texto)?);
@@ -117,7 +119,7 @@ fn agregar_paginas(destino: &mut PdfDocument, origen: &PdfDocument) -> Result<()
 /// Lo que una hoja puede heredar de más arriba: se le deja puesto para que no dependa del orden.
 const HEREDABLES: [&str; 4] = ["MediaBox", "CropBox", "Resources", "Rotate"];
 
-pub(super) fn organizar_y_guardar(doc: &PdfDocument, hojas: &[Hoja], destino: &str) -> Result<(), String> {
+pub(super) fn organizar_y_guardar(doc: &PdfDocument, hojas: &[Hoja], destino: &str, clave: Option<&str>) -> Result<(), String> {
     if hojas.is_empty() {
         return Err("No quedó ninguna página para guardar.".into());
     }
@@ -127,7 +129,8 @@ pub(super) fn organizar_y_guardar(doc: &PdfDocument, hojas: &[Hoja], destino: &s
     }
     let temporal = format!("{destino}.organizando");
     guardar_doc(doc, &temporal)?;
-    let r = PdfDocument::open(&temporal).map_err(texto).and_then(|mut copia| {
+    // La copia conserva la contraseña del original: se abre con ella.
+    let r = abrir_pdf(&temporal, clave).and_then(|mut copia| {
         reordenar(&mut copia, hojas)?;
         guardar_doc(&copia, destino)
     });
