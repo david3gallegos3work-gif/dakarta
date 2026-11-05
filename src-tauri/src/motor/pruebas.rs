@@ -283,10 +283,10 @@ fn organizar_mueve_gira_quita_y_duplica_sin_tocar_el_abierto() {
     // Una nota sin guardar en la hoja 2: debe ir con su hoja (y con la copia).
     anotar_caja(&mut doc, 1, 0.1, 0.1, "Ojo", (0.0, 0.0, 0.0), 12.0, true).unwrap();
     let hojas = [
-        Hoja { pagina: 3, giro: 90 },
-        Hoja { pagina: 1, giro: 0 },
-        Hoja { pagina: 1, giro: 0 },
-        Hoja { pagina: 0, giro: -90 },
+        Hoja { pagina: 3, giro: 90, archivo: ABIERTO },
+        Hoja { pagina: 1, giro: 0, archivo: ABIERTO },
+        Hoja { pagina: 1, giro: 0, archivo: ABIERTO },
+        Hoja { pagina: 0, giro: -90, archivo: ABIERTO },
     ];
     organizar_y_guardar(&doc, &hojas, &destino).unwrap();
     assert_eq!(doc.page_count().unwrap(), 4, "el PDF abierto no cambia");
@@ -312,7 +312,7 @@ fn organizar_mueve_gira_quita_y_duplica_sin_tocar_el_abierto() {
 fn organizar_rechaza_una_lista_vacia_o_con_paginas_que_no_existen() {
     let doc = doc_de(300.0, 400.0);
     assert!(organizar_y_guardar(&doc, &[], "/tmp/no-se-usa.pdf").is_err());
-    assert!(organizar_y_guardar(&doc, &[Hoja { pagina: 5, giro: 0 }], "/tmp/no-se-usa.pdf").is_err());
+    assert!(organizar_y_guardar(&doc, &[Hoja { pagina: 5, giro: 0, archivo: ABIERTO }], "/tmp/no-se-usa.pdf").is_err());
 }
 
 #[test]
@@ -321,12 +321,72 @@ fn duplicar_una_hoja_con_formulario_no_duplica_las_casillas() {
     let doc = PdfDocument::open(ruta).unwrap();
     let destino = std::env::temp_dir().join(format!("dakarta-dup-form-{}.pdf", std::process::id()));
     let destino = destino.to_string_lossy().into_owned();
-    organizar_y_guardar(&doc, &[Hoja { pagina: 0, giro: 0 }, Hoja { pagina: 0, giro: 0 }], &destino).unwrap();
+    organizar_y_guardar(&doc, &[Hoja { pagina: 0, giro: 0, archivo: ABIERTO }, Hoja { pagina: 0, giro: 0, archivo: ABIERTO }], &destino).unwrap();
     let mut nuevo = PdfDocument::open(&destino).unwrap();
     assert_eq!(nuevo.page_count().unwrap(), 2);
     assert!(nuevo.load_pdf_page(0).unwrap().widgets().count() > 0);
     assert_eq!(nuevo.load_pdf_page(1).unwrap().widgets().count(), 0);
     let acepto = campos_doc(&nuevo).unwrap().into_iter().find(|c| c.nombre == "acepto").unwrap();
     fijar_campo(&mut nuevo, 0, acepto.xref, &acepto.encendido).unwrap();
+    std::fs::remove_file(&destino).unwrap();
+}
+
+/// PDF de prueba en memoria con hojas que dicen «<prefijo> N».
+fn pdf_con_texto(prefijo: &str, n: usize) -> PdfDocument {
+    let ruta = std::env::temp_dir().join(format!("dakarta-{prefijo}-{}.pdf", std::process::id()));
+    std::fs::write(&ruta, pdf_numerado(n).replace("(hoja ", &format!("({prefijo} "))).unwrap();
+    let doc = PdfDocument::open(ruta.to_str().unwrap()).unwrap();
+    std::fs::remove_file(&ruta).unwrap();
+    doc
+}
+
+fn textos(doc: &PdfDocument) -> Vec<String> {
+    (0..doc.page_count().unwrap())
+        .map(|i| doc.load_page(i).unwrap().text(TextExtractOptions::default()).unwrap().trim().to_string())
+        .collect()
+}
+
+#[test]
+fn unir_intercala_hojas_de_dos_pdfs_con_sus_notas() {
+    let mut a = pdf_con_texto("a", 2);
+    let mut b = pdf_con_texto("b", 3);
+    anotar_caja(&mut a, 1, 0.1, 0.1, "Nota de A", (0.0, 0.0, 0.0), 12.0, true).unwrap();
+    anotar_sello(&mut b, 0, 0.5, 0.5, "PAGADO", (0.0, 0.5, 0.0), 18.0).unwrap();
+    let destino = std::env::temp_dir().join(format!("dakarta-unido-{}.pdf", std::process::id()));
+    let destino = destino.to_string_lossy().into_owned();
+    let hojas = [
+        Hoja { pagina: 0, giro: 0, archivo: 0 },
+        Hoja { pagina: 1, giro: 90, archivo: ABIERTO },
+        Hoja { pagina: 2, giro: 0, archivo: 0 },
+        Hoja { pagina: 0, giro: 0, archivo: ABIERTO },
+    ];
+    unir_y_guardar(Some(&a), &[&b], &hojas, &destino).unwrap();
+    assert_eq!((a.page_count().unwrap(), b.page_count().unwrap()), (2, 3), "los originales no cambian");
+    assert!(!std::path::Path::new(&format!("{destino}.uniendo")).exists());
+    let u = PdfDocument::open(&destino).unwrap();
+    assert_eq!(textos(&u), ["b 1", "a 2", "b 3", "a 1"]);
+    let giros: Vec<i32> = (0..4).map(|i| u.load_pdf_page(i).unwrap().rotation().unwrap()).collect();
+    assert_eq!(giros, [0, 90, 0, 0]);
+    let notas: Vec<usize> = (0..4).map(|i| u.load_pdf_page(i).unwrap().annotations().count()).collect();
+    assert_eq!(notas, [1, 1, 0, 0], "el sello va con b 1 y la nota con a 2");
+    std::fs::remove_file(&destino).unwrap();
+}
+
+#[test]
+fn unir_sin_pdf_abierto_y_con_formulario_agregado() {
+    let b = pdf_con_texto("b", 2);
+    let form = PdfDocument::open(concat!(env!("CARGO_MANIFEST_DIR"), "/pruebas/formulario.pdf")).unwrap();
+    let destino = std::env::temp_dir().join(format!("dakarta-unido2-{}.pdf", std::process::id()));
+    let destino = destino.to_string_lossy().into_owned();
+    let hojas = [Hoja { pagina: 1, giro: 0, archivo: 0 }, Hoja { pagina: 0, giro: 0, archivo: 1 }];
+    unir_y_guardar(None, &[&b, &form], &hojas, &destino).unwrap();
+    let u = PdfDocument::open(&destino).unwrap();
+    assert_eq!(u.page_count().unwrap(), 2);
+    assert_eq!(textos(&u)[0], "b 2");
+    assert!(textos(&u)[1].contains("Formulario de prueba"));
+    // Las casillas del segundo PDF no se copian (serían campos sueltos que no se llenan).
+    assert_eq!(u.load_pdf_page(1).unwrap().widgets().count(), 0);
+    // Sin PDF abierto, pedir una hoja «del abierto» es un error claro.
+    assert!(unir_y_guardar(None, &[&b], &[Hoja { pagina: 0, giro: 0, archivo: ABIERTO }], &destino).is_err());
     std::fs::remove_file(&destino).unwrap();
 }
