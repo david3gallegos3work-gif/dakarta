@@ -1,6 +1,6 @@
 [package]
 name = "dakarta"
-version = "0.4.3"
+version = "0.4.4"
 description = "Dakarta: lector de PDF sin anuncios"
 license = "AGPL-3.0-or-later"
 edition = "2024"
@@ -22,12 +22,9 @@ tauri-plugin-fs = "2.7"
 tauri-plugin-opener = "2.7"
 serde = { version = "1", features = ["derive"] }
 # Motor PDF: MuPDF de Artifex Software (AGPL). Sin OCR ni JavaScript por ahora: compila más rápido y la app pesa menos.
-mupdf = { version = "0.8", default-features = false, features = ["base14-fonts", "html", "epub", "xps", "cbz", "img"] }
+mupdf = { version = "0.8", default-features = false, features = ["base14-fonts"] }
 # MuPDF solo entrega PNG; JPEG pesa ~10 veces menos y llega más rápido a la pantalla.
 jpeg-encoder = "0.7"
-# Lector de Word propio: un .docx es un ZIP con XML. Solo lectura y sin dependencias pesadas.
-zip = { version = "2", default-features = false, features = ["deflate"] }
-roxmltree = "0.20"
 
 [profile.release]
 opt-level = 3
