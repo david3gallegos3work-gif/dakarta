@@ -288,3 +288,8 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .tarjeta-ocupado { flex-direction: row; align-items: center; gap: 16px; width: auto; font-size: 16px; }
 .ficha-cargando { cursor: default; }
 .ficha-cargando .ficha-hoja { background: rgba(21, 101, 192, 0.06); border-radius: 6px; }
+.recientes li, .recientes-panel li { display: flex; gap: 4px; min-width: 0; }
+.recientes li > button:first-child, .recientes-panel li > button:first-child { flex: 1; min-width: 0; }
+.recientes .quitar-reciente, .recientes-panel .quitar-reciente { flex: none; width: 40px; padding: 0; text-align: center; color: #607d8b; font-size: 16px; }
+.recientes .quitar-reciente:hover, .recientes-panel .quitar-reciente:hover { background: #ffebee; color: #c62828; }
+.noche .recientes .quitar-reciente, .noche .recientes-panel .quitar-reciente { color: #aaa; }

@@ -262,7 +262,7 @@ export function Organizar({
               ? `Toca «+ Fotos» para elegirlas${android ? ' o «Cámara» para tomar una' : ''}. Cada foto será una hoja.`
               : unir && !lista.length
               ? 'Toca «Agregar PDF» para elegir los PDFs que quieres unir.'
-              : 'Toca las hojas para marcarlas. Mantén presionada una y arrástrala para moverla.')}
+              : 'Toca las hojas para marcarlas (un espacio en blanco las desmarca). Mantén presionada una y arrástrala para moverla.')}
         </p>
       )}
       {fotos && (
@@ -285,7 +285,14 @@ export function Organizar({
           ))}
         </ul>
       )}
-      <div className="organizar-rejilla" ref={rejilla}>
+      <div
+        className="organizar-rejilla"
+        ref={rejilla}
+        onClick={(e) => {
+          // Tocar un espacio en blanco (no una hoja) desmarca todo.
+          if (e.target === e.currentTarget) setMarcadas(new Set())
+        }}
+      >
         {lista.map((f, i) => (
           <button
             key={f.id}
@@ -393,7 +400,6 @@ export function Organizar({
                 Extraer
               </button>
             )}
-            <button onClick={() => setMarcadas(new Set())}>Desmarcar</button>
           </>
         ) : fotos ? (
           <>
