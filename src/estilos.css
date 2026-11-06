@@ -282,3 +282,9 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .organizar-diseno select { flex: 1; min-width: 0; min-height: 40px; padding: 0 8px; border: 1px solid #9fb3c8; border-radius: 8px; background: #fff; color: inherit; font: inherit; font-weight: 400; }
 .noche .organizar-diseno { background: #242424; border-color: #3a3a3a; }
 .noche .organizar-diseno select { background: #2f2f2f; border-color: #555; }
+.ruedita { display: inline-block; flex: none; width: 34px; height: 34px; border: 4px solid rgba(21, 101, 192, 0.25); border-top-color: #1565c0; border-radius: 50%; animation: girar-ruedita 0.8s linear infinite; }
+@keyframes girar-ruedita { to { transform: rotate(360deg); } }
+.fondo-aviso.ocupado { z-index: 25; }
+.tarjeta-ocupado { flex-direction: row; align-items: center; gap: 16px; width: auto; font-size: 16px; }
+.ficha-cargando { cursor: default; }
+.ficha-cargando .ficha-hoja { background: rgba(21, 101, 192, 0.06); border-radius: 6px; }
