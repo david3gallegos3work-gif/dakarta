@@ -217,7 +217,7 @@ export function Organizar({
   /** Botón que abre la galería (varias fotos) o la cámara (una). */
   const elegirFotos = (camara: boolean) => (
     <label className={agregando ? 'boton-archivo desactivado' : 'boton-archivo'}>
-      {camara ? 'Cámara' : agregando ? 'Preparando…' : '+ Fotos'}
+      {camara ? 'Cámara' : '+ Fotos'}
       <input
         type="file"
         accept="image/*"
@@ -241,7 +241,7 @@ export function Organizar({
           ←
         </button>
         <strong>{titulo}</strong>
-        <span className="organizar-cuenta">{lista.length} hojas</span>
+        <span className="organizar-cuenta">{lista.length} {lista.length === 1 ? 'hoja' : 'hojas'}</span>
         <button className="derecha" onClick={deshacer} disabled={!historial.length} aria-label="Deshacer" title="Deshacer">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M9 14 4 9l5-5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -348,6 +348,14 @@ export function Organizar({
             </span>
           </button>
         ))}
+        {fotos && agregando && (
+          <div className="ficha ficha-cargando" role="status">
+            <span className="ficha-hoja">
+              <span className="ruedita" aria-hidden="true" />
+            </span>
+            <span className="ficha-numero">Cargando foto…</span>
+          </div>
+        )}
       </div>
       {fichaArrastrada && arrastre && (
         <img
@@ -360,7 +368,7 @@ export function Organizar({
       <div className="organizar-acciones">
         {marcadasEnOrden.length > 0 ? (
           <>
-            <span className="organizar-cuenta">{marcadasEnOrden.length} marcadas</span>
+            <span className="organizar-cuenta">{marcadasEnOrden.length} {marcadasEnOrden.length === 1 ? 'marcada' : 'marcadas'}</span>
             <button onClick={() => mover(-1)} aria-label="Mover antes" title="Mover antes">
               ◀
             </button>

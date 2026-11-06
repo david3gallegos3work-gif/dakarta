@@ -217,31 +217,35 @@ async function pintarImagen(imagen: ImageBitmap, maximo: number, giro: number, c
   }
 }
 
+/** Lado más largo de la vista de la foto en pantalla (recortar y miniaturas recortadas): abre al instante. */
+export const LADO_VISTA = 1280
+
+function jpegDeLienzo(imagen: ImageBitmap, maximo: number, calidad: number): Promise<Blob> {
+  const { ancho, alto } = achicar(imagen.width, imagen.height, maximo)
+  const [c, g] = lienzo(ancho, alto)
+  g.drawImage(imagen, 0, 0, ancho, alto)
+  return new Promise((listo, falla) => c.toBlob((b) => (b ? listo(b) : falla(new Error('Sin JPEG'))), 'image/jpeg', calidad))
+}
+
 /**
  * Al agregar una foto se abre una sola vez (lo más lento: una foto de celular tiene unos 12 millones de
- * puntos) y de ahí salen su copia de trabajo, más liviana, y su miniatura. El navegador ya la endereza (EXIF).
+ * puntos). De ahí salen enseguida la miniatura y una vista mediana para la pantalla; la copia de trabajo,
+ * más grande (para el PDF), se termina por detrás mientras se sigue usando la app. El navegador ya la
+ * endereza (EXIF).
  */
-export async function prepararFoto(archivo: Blob): Promise<{ trabajo: Blob; miniatura: string }> {
+export async function prepararFoto(archivo: Blob): Promise<{ miniatura: string; vista: Blob; trabajo: Promise<Blob> }> {
   const imagen = await createImageBitmap(archivo)
   try {
-    const { ancho, alto } = achicar(imagen.width, imagen.height, LADO_TRABAJO)
-    // Si ya es chica, se usa tal cual.
-    const trabajo =
-      ancho === imagen.width && archivo.type === 'image/jpeg'
-        ? archivo
-        : await new Promise<Blob>((listo, falla) => {
-            const [c, g] = lienzo(ancho, alto)
-            g.drawImage(imagen, 0, 0, ancho, alto)
-            c.toBlob((b) => (b ? listo(b) : falla(new Error('Sin JPEG'))), 'image/jpeg', 0.92)
-          })
-    const { ancho: w, alto: h } = achicar(imagen.width, imagen.height, LADO_MINIATURA)
-    const [c, g] = lienzo(w, h)
-    g.drawImage(imagen, 0, 0, w, h)
-    const mini = await new Promise<Blob | null>((listo) => c.toBlob(listo, 'image/jpeg', 0.8))
-    if (!mini) throw new Error('Sin JPEG')
-    return { trabajo, miniatura: URL.createObjectURL(mini) }
-  } finally {
+    const miniatura = URL.createObjectURL(await jpegDeLienzo(imagen, LADO_MINIATURA, 0.8))
+    const vista = await jpegDeLienzo(imagen, LADO_VISTA, 0.88)
+    const chica = Math.max(imagen.width, imagen.height) <= LADO_TRABAJO
+    const trabajo = (chica && archivo.type === 'image/jpeg' ? Promise.resolve(archivo) : jpegDeLienzo(imagen, LADO_TRABAJO, 0.92)).finally(
+      () => imagen.close(),
+    )
+    return { miniatura, vista, trabajo }
+  } catch (e) {
     imagen.close()
+    throw e
   }
 }
 
