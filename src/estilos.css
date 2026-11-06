@@ -88,7 +88,7 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .campo.protegido { border-color: #777; background: rgba(0, 0, 0, 0.06); color: #666; cursor: default; }
 .resaltado.actual { background: rgba(255, 145, 0, 0.5); box-shadow: 0 0 0 1px rgba(230, 80, 0, 0.8); }
 
-.indice { flex: none; width: min(320px, 85vw); overflow: auto; padding: 8px 0; background: #fff; border-right: 1px solid #ddd; }
+.indice { flex: none; width: min(340px, 88vw); overflow: auto; padding: 0; background: #fff; border-right: 1px solid #ddd; box-shadow: 4px 0 16px rgba(0, 0, 0, 0.18); }
 .indice ul { list-style: none; margin: 0; padding-left: 12px; }
 .indice > ul { padding-left: 0; }
 .indice button { display: block; width: 100%; padding: 8px 12px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
@@ -341,3 +341,59 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .titulo-pdf span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .titulo-pdf small { flex: none; color: #ffcc80; font-size: 12px; }
 .noche .titulo-pdf { background: #000; color: #bbb; }
+/* Menú lateral (diseño B): el PDF abierto, últimos archivos en lista, Gemini, herramientas en cuadrícula y versión. */
+.menu-lateral { display: flex; flex-direction: column; gap: 10px; padding: 0 12px 16px; color: #1f2937; }
+.menu-lateral h3, .menu-indice h3 { margin: 6px 4px 0; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: #6b7280; }
+.menu-abierto { display: flex; align-items: center; gap: 12px; margin: 0 -12px; padding: 14px 16px; border-bottom: 1px solid #eef1f5; }
+.menu-abierto > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.menu-abierto strong { font-size: 15px; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
+.menu-abierto > div > span { font-size: 12px; color: #6b7280; }
+.menu-icono-pdf { flex: none; width: 46px; height: 54px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: #ffebee; color: #c62828; }
+.indice .menu-abrir { display: flex; align-items: center; justify-content: center; gap: 8px; height: 46px; border-radius: 10px; background: #1565c0; color: #fff; font-size: 16px; font-weight: 600; }
+.indice .menu-abrir:hover { background: #0d47a1; }
+.menu-recientes { margin: 0; padding: 0; list-style: none; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; }
+.menu-recientes li { display: flex; align-items: center; border-bottom: 1px solid #eef1f5; }
+.menu-recientes li:last-child { border-bottom: 0; }
+.menu-recientes li.abierto { background: #e3f2fd; }
+.indice .menu-reciente { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 0 4px 0 12px; border-radius: 0; color: inherit; font-size: 14px; }
+.indice .menu-reciente:disabled { opacity: 1; cursor: default; }
+.menu-reciente svg { flex: none; color: #c62828; }
+.menu-reciente span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-recientes li.abierto .menu-reciente { color: #0d47a1; font-weight: 600; }
+.menu-reciente em { flex: none; padding: 2px 6px; border-radius: 6px; background: #1565c0; color: #fff; font-size: 10px; font-style: normal; font-weight: 700; }
+.indice .menu-quitar { flex: none; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; padding: 0; color: #9ca3af; }
+.indice .menu-quitar:hover { background: #ffebee; color: #c62828; }
+.indice .menu-gemini { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 14px; background: linear-gradient(120deg, #4285f4, #9b72cb, #d96570); color: #fff; text-align: left; }
+.indice .menu-gemini:hover { filter: brightness(1.05); background: linear-gradient(120deg, #4285f4, #9b72cb, #d96570); }
+.menu-gemini span { display: flex; flex-direction: column; font-size: 13px; opacity: 0.95; }
+.menu-gemini strong { font-size: 16px; }
+.menu-cuadricula { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.indice .menu-herramienta { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 4px; border-radius: 12px; background: #f6f8fb; color: #1f2937; font-size: 12.5px; line-height: 1.2; text-align: center; }
+.indice .menu-herramienta:hover { background: #eaf1fb; }
+.menu-ficha { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+.menu-ficha.azul { background: #e3f2fd; color: #1565c0; }
+.menu-ficha.verde { background: #e8f5e9; color: #2e7d32; }
+.menu-ficha.naranja { background: #fff3e0; color: #e65100; }
+.menu-ficha.morado { background: #f3e5f5; color: #7b1fa2; }
+.menu-ficha.rojo { background: #ffebee; color: #c62828; }
+.menu-ficha.celeste { background: #e0f7fa; color: #00838f; }
+.menu-ficha.gris { background: #eceff1; color: #455a64; }
+.indice .menu-version { display: flex; align-items: center; gap: 10px; margin-top: 6px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 12px; color: #1f2937; font-size: 14px; text-align: left; }
+.menu-version > span:not(.menu-logo) { flex: 1; display: flex; flex-direction: column; }
+.menu-version small { font-size: 12px; color: #2e7d32; }
+.menu-version small.hay-nueva { color: #e65100; font-weight: 600; }
+.menu-version svg { color: #9ca3af; }
+.menu-logo { flex: none; width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: #1565c0; color: #fff; font-weight: 800; }
+.menu-indice { display: flex; flex-direction: column; gap: 6px; padding: 10px 8px 16px; }
+.indice .menu-volver { display: flex; align-items: center; gap: 6px; color: #1565c0; font-weight: 600; }
+.menu-nota { color: #666; }
+.noche .menu-lateral { color: #eee; }
+.noche .menu-abierto { border-color: #333; }
+.noche .menu-icono-pdf { background: #3a1f1f; }
+.noche .menu-recientes { border-color: #3a3a3a; }
+.noche .menu-recientes li { border-color: #333; }
+.noche .menu-recientes li.abierto { background: #0d2a4a; }
+.noche .menu-recientes li.abierto .menu-reciente { color: #90caf9; }
+.noche .indice .menu-herramienta { background: #2a2a2a; color: #eee; }
+.noche .indice .menu-version { border-color: #3a3a3a; color: #eee; }
+.noche .menu-ficha { filter: brightness(0.85); }

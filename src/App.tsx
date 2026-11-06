@@ -24,7 +24,8 @@ import { Organizar, type Modo } from './Organizar.tsx'
 import { ABIERTO, type Fuente } from './organizar.ts'
 import { Paginas } from './Paginas.tsx'
 import { Recortar } from './Recortar.tsx'
-import { Indice, Paleta, PanelAnotacion, Tamanos } from './Paneles.tsx'
+import { MenuLateral } from './MenuLateral.tsx'
+import { Paleta, PanelAnotacion, Tamanos } from './Paneles.tsx'
 import {
   guardarReciente,
   leerRecientes,
@@ -1850,101 +1851,39 @@ export default function App() {
               if (a.x - t.clientX > 60 && Math.abs(t.clientY - a.y) < 50) setVerIndice(false)
             }}
           >
-            <button className="abrir-indice" onClick={abrir} disabled={abriendo}>
-              {abriendo ? 'Abriendo…' : 'Abrir'}
-            </button>
-            {recientes.length > 0 && (
-              <div className="recientes-panel">
-                <h2>Últimos archivos</h2>
-                <ul>
-                  {recientes.slice(0, 4).map((r) => (
-                    <li key={r.ruta}>
-                      <button onClick={() => abrirReciente(r)} disabled={abriendo} title={r.nombre}>
-                        {r.nombre}
-                      </button>
-                      <button
-                        className="quitar-reciente"
-                        onClick={() => setRecientes((lista) => olvidarReciente(lista, r.ruta))}
-                        aria-label={`Quitar «${r.nombre}» de la lista`}
-                        title="Quitar de la lista (no borra el archivo)"
-                      >
-                        ✕
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {doc.info.indice.length ? (
-              <Indice
-                entradas={doc.info.indice}
-                ir={(n) => {
-                  ir(n)
-                  if (anchoVisor < 700) setVerIndice(false)
-                }}
-              />
-            ) : (
-              <p>Este PDF no trae índice lateral. Si tiene una página de índice al inicio, toca sus líneas: si traen enlace, te llevan a esa página.</p>
-            )}
-            <button
-              className="version-indice"
-              onClick={() => {
-                setVerIndice(false)
-                setOrganizar({ modo: 'organizar', fuentes: [fuenteAbierta(doc)] })
+            <MenuLateral
+              nombre={nombreActual || doc.info.nombre}
+              paginas={doc.info.paginas}
+              conClave={doc.info.con_clave}
+              indice={doc.info.indice}
+              recientes={recientes}
+              rutaActual={rutaActual}
+              abriendo={abriendo}
+              nueva={nueva}
+              onAbrir={abrir}
+              onReciente={abrirReciente}
+              onQuitarReciente={(r) => setRecientes((lista) => olvidarReciente(lista, r.ruta))}
+              onIr={(n) => {
+                ir(n)
+                if (anchoVisor < 700) setVerIndice(false)
               }}
-            >
-              Organizar páginas
-            </button>
-            <button
-              className="version-indice"
-              onClick={() => {
+              onHerramienta={(h) => {
+                if (h === 'gemini') return abrirGemini()
+                if (h === 'version') return setVerAcerca(true)
                 setVerIndice(false)
-                setOrganizar({ modo: 'unir', fuentes: [fuenteAbierta(doc)] })
-              }}
-            >
-              Unir con otros PDFs
-            </button>
-            <button
-              className="version-indice"
-              onClick={() => {
-                setVerIndice(false)
-                setVerComprimir(true)
-              }}
-            >
-              Comprimir PDF
-            </button>
-            <button className="version-indice" onClick={() => abrirGemini()}>
-              ✨ Gemini: resumir y preguntar
-            </button>
-            <button
-              className="version-indice"
-              onClick={() => {
-                setVerIndice(false)
-                setOrganizar({ modo: 'fotos', fuentes: [] })
-              }}
-            >
-              Crear PDF desde fotos
-            </button>
-            <button
-              className="version-indice"
-              onClick={() => {
-                setVerIndice(false)
-                setPideClave({
-                  titulo: doc.info.con_clave ? 'Cambiar la contraseña' : 'Proteger con contraseña',
-                  texto: 'Se guarda una copia que pide esta contraseña para abrirse. El PDF de ahora no cambia.',
-                  nueva: true,
-                  boton: 'Guardar copia',
-                  alListo: (c) => void guardarCopia(undefined, c),
-                })
-              }}
-            >
-              {doc.info.con_clave ? 'Cambiar la contraseña' : 'Proteger con contraseña'}
-            </button>
-            {doc.info.con_clave && (
-              <button
-                className="version-indice"
-                onClick={() => {
-                  setVerIndice(false)
+                if (h === 'organizar') setOrganizar({ modo: 'organizar', fuentes: [fuenteAbierta(doc)] })
+                else if (h === 'unir') setOrganizar({ modo: 'unir', fuentes: [fuenteAbierta(doc)] })
+                else if (h === 'escaner') setOrganizar({ modo: 'fotos', fuentes: [] })
+                else if (h === 'comprimir') setVerComprimir(true)
+                else if (h === 'clave')
+                  setPideClave({
+                    titulo: doc.info.con_clave ? 'Cambiar la contraseña' : 'Proteger con contraseña',
+                    texto: 'Se guarda una copia que pide esta contraseña para abrirse. El PDF de ahora no cambia.',
+                    nueva: true,
+                    boton: 'Guardar copia',
+                    alListo: (c) => void guardarCopia(undefined, c),
+                  })
+                else if (h === 'quitarClave')
                   setPregunta({
                     titulo: 'Quitar la contraseña',
                     texto: 'Se guarda una copia que se abre sin contraseña. El PDF de ahora no cambia.',
@@ -1952,14 +1891,8 @@ export default function App() {
                     no: 'Cancelar',
                     alSi: () => void guardarCopia(undefined, ''),
                   })
-                }}
-              >
-                Quitar la contraseña
-              </button>
-            )}
-            <button className="version-indice" onClick={() => setVerAcerca(true)}>
-              Dakarta · versión y descargas
-            </button>
+              }}
+            />
           </nav>
         )}
         <div
@@ -2144,7 +2077,7 @@ export default function App() {
               Unir PDFs
             </button>
             <button className="unir-inicio" onClick={() => setOrganizar({ modo: 'fotos', fuentes: [] })} disabled={abriendo}>
-              Crear PDF desde fotos
+              Escáner (PDF desde fotos)
             </button>
             {error && <p className="error">{error}</p>}
             {recientes.length > 0 && (
