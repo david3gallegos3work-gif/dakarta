@@ -1,8 +1,8 @@
 # Nota de traspaso
 
-**Fecha y lugar:** 2026-11-03 22:20, en la PC. Actualizada el 2026-11-05 (Ecuador) desde la nube.
-**IA y aparato:** Claude Code. Revisión en la PC; arreglos en la nube.
-**Rama:** `main` (versión 0.5.1).
+**Fecha y lugar:** 2026-11-05 (Ecuador, noche), en la nube (celular). David sigue mañana desde la PC.
+**IA y aparato:** Claude Code, celular/nube.
+**Rama:** `main` (versión 0.5.1, compilada y publicada; David la probó y quedó todo bien).
 
 ## Hecho en la nube (2026-11-03 y 2026-11-04)
 
@@ -44,11 +44,12 @@
 - 0.5.0 (Fase 5, primera parte): Gemini en el panel ☰ («✨ Gemini: resumir y preguntar», `src/Gemini.tsx`, lógica en `src/gemini.ts`, basada en el módulo de Datheke que David autorizó revisar). Vincular: «Abrir Google» (`abrir_pagina_gemini`, URL fija) → pegar → se revisa con Google antes de guardar. La clave va en la carpeta privada de la app (`gemini.clave`, mezclada para no leerse a simple vista; no es cifrado fuerte: la protección es la carpeta privada), nunca en GitHub. Resumir (todo o páginas desde–hasta) y preguntar (con lo ya hablado). El texto sale del motor (`textos`, `textos_de` en `motor/capas.rs`); las páginas escaneadas van como imagen de 1100 px por `pagina://`. PDFs largos: partes de 150 000 letras o 12 imágenes (máximo 8 partes); al resumir se une; al preguntar se busca en cada parte y se descartan las que responden NADA. Modelos: Flash-Lite y luego Flash (se recuerda el que funcionó). Errores claros (límite gratis 429, clave no aceptada, sin conexión, país, demasiado largo). Respuesta en texto simple con viñetas y negritas (sin HTML) y botón Copiar. Pruebas: 35 del motor, 36 de la pantalla. Falta (segunda parte): explicar lo seleccionado, traducir, puntos clave, preguntas de estudio.
 - David probó la 0.5.0 (Gemini resumir y preguntar): funciona muy bien.
 - 0.5.1: nombre del PDF abierto en una franja bajo la barra (`.titulo-pdf`, con «· sin guardar» si hay cambios). Gemini, segunda parte: «Puntos clave», «Preguntas de estudio» y «Traducir» sobre las páginas (`tareaDocumento` con una receta por tarea; traducir va en partes de 10 000 letras, hasta 15, y se juntan sin resumir) y «✨ Explicar» en la barra de seleccionar texto: abre Gemini y explica el texto elegido (también «Traducir» ese texto). Pruebas: 35 del motor, 39 de la pantalla. Menú lateral nuevo (David eligió el diseño B con los últimos archivos en lista, `src/MenuLateral.tsx`): el PDF abierto arriba, «Abrir otro PDF», últimos archivos (el abierto marcado «ABIERTO», con ✕), Gemini destacado, herramientas en cuadrícula (Índice —abre el índice en el mismo panel—, Organizar, Unir PDFs, Comprimir, Contraseña, Escáner; «Quitar contraseña» si tiene) y «Dakarta · versión y descargas» con la versión (o «Hay una versión nueva»). «Crear PDF desde fotos» pasa a llamarse «Escáner» (pedido de David).
+- David probó la 0.5.1 (menú nuevo, Escáner, nombre del PDF arriba, Gemini segunda parte): quedó todo bien.
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo
 
-Revisé lo que hizo DeepSeek desde la marca `fin-fase-1-claude` (Fase 2) y, con el OK de David, arreglé los hallazgos 1 a 11 y 14, más los ajustes que él pidió al probar en el celular. La revisión quedó terminada.
+Hasta la 0.5.1 está todo hecho, publicado y probado por David: contraseña, escáner (con cédula y papeleta, recortar y enderezar), comprimir, Gemini completo (resumir, preguntar, puntos clave, preguntas de estudio, traducir, explicar lo seleccionado) y el menú lateral nuevo. No quedó nada a medias.
 
 ## Lo que se comprobó
 
@@ -86,10 +87,9 @@ Búsqueda, últimos archivos, compartir, selector de Android con permiso guardab
 
 ## Qué falta, en orden
 
-1. David prueba la 0.2.12 en el celular: Nota amarilla, formulario (F/M y casillas), mover un sello, buscar en un PDF grande, guardar copia, tocar el índice impreso y las dos manijas de selección.
-2. ✅ Separados `App.tsx` y `motor.rs` (hallazgo 13), junto con la 0.2.14.
-3. Fase 3 completa: organizar un PDF ✅ (0.3.0) y unir varios PDFs ✅ (0.4.5).
-4. Fase 4: descartada por David (2026-11-05); quitada en la 0.4.4.
+1. Fase 6, lo que queda (preguntarle a David por cuál empezar): OCR sin conexión (texto de páginas escaneadas), leer en voz alta (TTS de Android/Windows), convertir PDF a texto. Lo de Word quedó descartado.
+2. Pendientes viejos por comprobar en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
+3. Hechos: Fases 1, 2, 3 y 5; de la 6, contraseña (0.4.7), escáner (0.4.9) y comprimir (0.4.15). Fase 4 descartada (0.4.4).
 
 ## Pendiente para el celular
 
@@ -97,8 +97,10 @@ Desde la nube no se sube directo a `main`: se publica con un pull request y se u
 
 ## Pendiente para la PC
 
-Nada.
+- Pasar a la fuente única (mi-setup) el aprendizaje de abajo, con el proceso de `cierre-de-sesion`.
+- La nube clonó `datheke/datheke.github.io` solo para leer su módulo de Gemini (con permiso de David); no se cambió nada allí.
 
 ## Aprendizajes para pasar a la fuente única
 
 - Cuando una revisión automática de la nube pida subir y David no ha dicho "sube", no se sube: manda su regla.
+- Tauri en Android: lo que la pantalla manda como bytes (`invoke` con `Uint8Array`) llega al Rust como lista de números en JSON (el IPC va por postMessage, solo texto); para archivos, mandar base64 y aceptar las dos formas (aprobado por David el 2026-11-05).
