@@ -2,7 +2,7 @@
 
 **Fecha y lugar:** 2026-11-03 22:20, en la PC. Actualizada el 2026-11-05 (Ecuador) desde la nube.
 **IA y aparato:** Claude Code. Revisión en la PC; arreglos en la nube.
-**Rama:** `main` (versión 0.4.15).
+**Rama:** `main` (versión 0.5.0).
 
 ## Hecho en la nube (2026-11-03 y 2026-11-04)
 
@@ -40,6 +40,8 @@
 - 0.4.13: David seguía notando lento al tomar la foto y al recortar. Ahora al agregar salen enseguida la miniatura y una vista de 1280 px (recortar y la miniatura recortada usan la vista); la copia de 2400 px para el PDF se termina por detrás (`trabajo` es una promesa). Ruedita con texto: «Cargando foto…» en la lista, «Recortando…» y «Creando PDF… foto i de n». «1 hoja» y «1 marcada» en singular.
 - 0.4.14: David confirmó que ya va más rápido. Organizar/unir/fotos: tocar un espacio en blanco de la rejilla desmarca (se quitó el botón «Desmarcar»). «Últimos archivos» (inicio y panel ☰): una ✕ al final quita el archivo de la lista (no lo borra).
 - 0.4.15: con hojas marcadas en fotos o unir, arriba sale en amarillo «Para agregar otra foto (otro PDF), primero quita la selección: toca un espacio en blanco» (pedido de David). Comprimir PDF (panel ☰): «Buena calidad» (imágenes hasta 2000 px, JPEG 80) o «Lo más liviano» (1300 px, JPEG 60). `motor/comprimir.rs`: en una copia (con anotaciones y contraseña), recorre las imágenes de cada hoja y de sus Form, lee sus puntos, las promedia más chicas y las guarda como JPEG solo si ahorran al menos 10 %; no toca máscaras, Decode, CMYK, paletas, JPEG 2000 ni JPEG ya chicos. Guarda con garbage 3 y fuentes comprimidas. Se usó la API segura del crate (pdf_rewrite_images de MuPDF no está expuesta sin protección ante errores). Mensaje con los pesos («de 48 MB a 9,3 MB, 81 % menos», `src/comprimir.ts`); la copia queda en «Últimos archivos» y se sigue en el PDF de antes. Pruebas: 33 del motor, 28 de la pantalla.
+- David probó comprimir: el PDF de prueba de 22,15 MB quedó en 4,07 MB (buena calidad) y 1,47 MB (lo más liviano).
+- 0.5.0 (Fase 5, primera parte): Gemini en el panel ☰ («✨ Gemini: resumir y preguntar», `src/Gemini.tsx`, lógica en `src/gemini.ts`, basada en el módulo de Datheke que David autorizó revisar). Vincular: «Abrir Google» (`abrir_pagina_gemini`, URL fija) → pegar → se revisa con Google antes de guardar. La clave va en la carpeta privada de la app (`gemini.clave`, mezclada para no leerse a simple vista; no es cifrado fuerte: la protección es la carpeta privada), nunca en GitHub. Resumir (todo o páginas desde–hasta) y preguntar (con lo ya hablado). El texto sale del motor (`textos`, `textos_de` en `motor/capas.rs`); las páginas escaneadas van como imagen de 1100 px por `pagina://`. PDFs largos: partes de 150 000 letras o 12 imágenes (máximo 8 partes); al resumir se une; al preguntar se busca en cada parte y se descartan las que responden NADA. Modelos: Flash-Lite y luego Flash (se recuerda el que funcionó). Errores claros (límite gratis 429, clave no aceptada, sin conexión, país, demasiado largo). Respuesta en texto simple con viñetas y negritas (sin HTML) y botón Copiar. Pruebas: 35 del motor, 36 de la pantalla. Falta (segunda parte): explicar lo seleccionado, traducir, puntos clave, preguntas de estudio.
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo

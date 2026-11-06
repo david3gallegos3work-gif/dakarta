@@ -33,6 +33,55 @@ fn descargar_version(app: AppHandle, url: String) -> Result<(), String> {
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Gemini: el texto de las páginas `desde`..=`hasta` (desde 0).
+#[tauri::command]
+async fn textos(motor: State<'_, Motor>, desde: i32, hasta: i32) -> Result<Vec<String>, String> {
+    motor.textos(desde, hasta)
+}
+
+/// Dónde se guarda la clave de Gemini: en la carpeta privada de la app (otras apps no la pueden leer).
+fn archivo_clave(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let carpeta = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&carpeta).map_err(|e| e.to_string())?;
+    Ok(carpeta.join("gemini.clave"))
+}
+
+/// La clave de Gemini guardada (vacía si no se vinculó).
+#[tauri::command]
+fn gemini_clave(app: AppHandle) -> Result<String, String> {
+    match std::fs::read(archivo_clave(&app)?) {
+        Ok(b) => Ok(revelar(&b)),
+        Err(_) => Ok(String::new()),
+    }
+}
+
+/// Guarda la clave de Gemini (ya revisada con Google por la pantalla); vacía la borra.
+#[tauri::command]
+fn gemini_guardar(app: AppHandle, clave: String) -> Result<(), String> {
+    let ruta = archivo_clave(&app)?;
+    if clave.trim().is_empty() {
+        let _ = std::fs::remove_file(ruta);
+        return Ok(());
+    }
+    std::fs::write(ruta, ocultar(clave.trim())).map_err(|e| e.to_string())
+}
+
+/// La clave no queda escrita tal cual en el archivo (no se lee a simple vista si alguien copia la carpeta).
+/// La protección de verdad es la carpeta privada de la app.
+const MEZCLA: &[u8] = b"Dakarta-Gemini-2026";
+fn ocultar(clave: &str) -> Vec<u8> {
+    clave.bytes().zip(MEZCLA.iter().cycle()).map(|(a, b)| a ^ b).collect()
+}
+fn revelar(datos: &[u8]) -> String {
+    String::from_utf8_lossy(&datos.iter().zip(MEZCLA.iter().cycle()).map(|(a, b)| a ^ b).collect::<Vec<_>>()).into_owned()
+}
+
+/// Abre en el navegador la página de Google donde se crea la clave gratis de Gemini.
+#[tauri::command]
+fn abrir_pagina_gemini(app: AppHandle) -> Result<(), String> {
+    app.opener().open_url("https://aistudio.google.com/apikey", None::<&str>).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn buscar(motor: State<'_, Motor>, texto: String) -> Result<Busqueda, String> {
     motor.buscar(texto)
@@ -424,6 +473,13 @@ mod pruebas_ipc {
     }
 
     #[test]
+    fn la_clave_de_gemini_no_queda_a_simple_vista_y_se_recupera() {
+        let guardada = super::ocultar("AIzaSyEjemplo-123");
+        assert!(!String::from_utf8_lossy(&guardada).contains("AIza"));
+        assert_eq!(super::revelar(&guardada), "AIzaSyEjemplo-123");
+    }
+
+    #[test]
     fn base64_igual_que_el_del_navegador() {
         for (texto, bytes) in [("", &b""[..]), ("Zg==", b"f"), ("Zm8=", b"fo"), ("Zm9v", b"foo"), ("Zm9vYmFy", b"foobar"), ("8J+Ygg==", "😂".as_bytes())] {
             assert_eq!(super::desde_base64(texto).unwrap(), bytes, "{texto}");
@@ -484,6 +540,10 @@ pub fn run() {
     fotos_guardar_copia,
     comprimir_en_cache,
     comprimir_copia,
+    textos,
+    gemini_clave,
+    gemini_guardar,
+    abrir_pagina_gemini,
     archivo_inicial,
     abrir_ruta,
     descargar_version,

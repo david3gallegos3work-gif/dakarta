@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import logo from '../assets/logo.jpg'
 import { AcercaDe } from './AcercaDe.tsx'
@@ -18,6 +18,8 @@ import {
   TAMANOS_TEXTO,
 } from './opciones.ts'
 import { base64De, jpegDe, miniaturaDe, nombreDeFotos, prepararFoto, type Diseno, type Recorte as RecorteFoto } from './fotos.ts'
+import { Gemini } from './Gemini.tsx'
+import type { Pieza } from './gemini.ts'
 import { Organizar, type Modo } from './Organizar.tsx'
 import { ABIERTO, type Fuente } from './organizar.ts'
 import { Paginas } from './Paginas.tsx'
@@ -136,6 +138,8 @@ export default function App() {
   const [pregunta, setPregunta] = useState<Pregunta | null>(null)
   const [pideClave, setPideClave] = useState<PideClave | null>(null)
   const [verComprimir, setVerComprimir] = useState(false)
+  const [verGemini, setVerGemini] = useState(false)
+  const [claveGemini, setClaveGemini] = useState('')
   const [verAcerca, setVerAcerca] = useState(false)
   // Pantalla de organizar páginas (un PDF) o de unir PDFs, con los PDFs cuyas hojas muestra al abrirse.
   const [organizar, setOrganizar] = useState<{ modo: Modo; fuentes: Fuente[] } | null>(null)
@@ -1199,6 +1203,32 @@ export default function App() {
     }
   }
 
+  /** Gemini: las páginas como las recibe (texto; las escaneadas, como imagen de la hoja). */
+  const piezasGemini = async (desde: number, hasta: number, avance: (t: string) => void): Promise<Pieza[]> => {
+    const textos = await invoke<string[]>('textos', { desde, hasta })
+    const escaneadas = textos.flatMap((t, i) => (t.length < 20 ? [i] : []))
+    if (escaneadas.length > 60) throw new Error('Tiene muchas páginas escaneadas. Elige hasta 60 páginas a la vez.')
+    const imagenes = new Map<number, string>()
+    for (const [k, i] of escaneadas.entries()) {
+      avance(`Preparando la página escaneada ${k + 1} de ${escaneadas.length}…`)
+      const res = await fetch(`${convertFileSrc(String(desde + i), 'pagina')}?w=1100&d=gemini${doc?.id ?? 0}`)
+      if (!res.ok) throw new Error(`No se pudo preparar la página ${desde + i + 1}.`)
+      imagenes.set(i, await base64De(await res.blob()))
+    }
+    return textos.map((texto, i) => {
+      const imagen = imagenes.get(i)
+      return imagen ? { pagina: desde + i, imagen } : { pagina: desde + i, texto }
+    })
+  }
+
+  const abrirGemini = () => {
+    setVerIndice(false)
+    invoke<string>('gemini_clave')
+      .then(setClaveGemini)
+      .catch(() => setClaveGemini(''))
+      .finally(() => setVerGemini(true))
+  }
+
   /** Guarda una copia comprimida del PDF abierto (con sus anotaciones) y dice cuánto se ahorró. */
   const comprimirPdf = async (nivel: Nivel) => {
     if (!doc || guardando) return
@@ -1355,6 +1385,10 @@ export default function App() {
         setVerComprimir(false)
         return true
       }
+      if (verGemini) {
+        setVerGemini(false)
+        return true
+      }
       if (pideClave) {
         setPideClave(null)
         pideClave.alCancelar?.()
@@ -1393,7 +1427,7 @@ export default function App() {
     return () => {
       delete window.DakartaAtras
     }
-  }, [verIndice, verBuscar, cerrarBuscar, sucio, pregunta, pideClave, recortando, verComprimir, verAcerca, organizar, cerrarOrganizar])
+  }, [verIndice, verBuscar, cerrarBuscar, sucio, pregunta, pideClave, recortando, verComprimir, verGemini, verAcerca, organizar, cerrarOrganizar])
 
   // Windows: avisar antes de cerrar la ventana si hay cambios sin guardar.
   useEffect(() => {
@@ -1853,6 +1887,9 @@ export default function App() {
             >
               Comprimir PDF
             </button>
+            <button className="version-indice" onClick={abrirGemini}>
+              ✨ Gemini: resumir y preguntar
+            </button>
             <button
               className="version-indice"
               onClick={() => {
@@ -2194,6 +2231,21 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {verGemini && doc && (
+        <Gemini
+          key={doc.id}
+          paginas={doc.info.paginas}
+          clave={claveGemini}
+          onClave={async (c) => {
+            await invoke('gemini_guardar', { clave: c })
+            setClaveGemini(c)
+          }}
+          cargarPiezas={piezasGemini}
+          onAbrirGoogle={() => invoke('abrir_pagina_gemini').catch((e) => setError(String(e)))}
+          onCerrar={() => setVerGemini(false)}
+        />
       )}
 
       {verComprimir && (
