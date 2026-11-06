@@ -5,7 +5,7 @@ Las reglas generales están en `~/.claude/CLAUDE.md`; aquí solo lo de este proy
 ## Cuentas (no mezclar con otros proyectos)
 - GitHub: `david3gallegos3work-gif`, repo `david3gallegos3work-gif/dakarta`. **Es público**: nada privado aquí.
 - Vercel: no usa. Supabase: no usa.
-- Firma del APK: secretos `ANDROID_KEYSTORE` y `ANDROID_KEYSTORE_PASSWORD` en GitHub; la clave vive en `C:\Users\david\.credenciales\dakarta\` (no la abras).
+- Firma del APK: con los secretos del repo en GitHub; la llave original está en las credenciales privadas de David (no la abras ni crees otra).
 - "sube" = commit + push. No hay despliegue: la app se compila en GitHub Actions.
 
 ## Compilar y verificar
