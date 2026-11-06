@@ -213,7 +213,7 @@ export function Organizar({
     fotos
       ? (miniaturas?.[f.archivo] ?? '')
       : `${convertFileSrc(String(f.pagina), 'pagina')}?w=${MINIATURA}${f.archivo === ABIERTO ? '' : `&a=${f.archivo}`}&o=${apertura}`
-  const titulo = unir ? 'Unir PDFs' : fotos ? 'Crear PDF desde fotos' : 'Organizar páginas'
+  const titulo = unir ? 'Unir PDFs' : fotos ? 'Escáner' : 'Organizar páginas'
   /** Botón que abre la galería (varias fotos) o la cámara (una). */
   const elegirFotos = (camara: boolean) => (
     <label className={agregando ? 'boton-archivo desactivado' : 'boton-archivo'}>
