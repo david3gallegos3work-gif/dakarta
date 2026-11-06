@@ -138,8 +138,10 @@ export default function App() {
   // Pantalla de organizar páginas (un PDF) o de unir PDFs, con los PDFs cuyas hojas muestra al abrirse.
   const [organizar, setOrganizar] = useState<{ modo: Modo; fuentes: Fuente[] } | null>(null)
   // Crear PDF desde fotos: cada foto elegida (por su número) y su miniatura.
-  // `archivo`: la copia de trabajo de la foto (más liviana que la original).
-  const fotos = useRef(new Map<number, { archivo: Blob; miniatura: string; recorte?: RecorteFoto }>())
+  // `vista`: la foto mediana para la pantalla; `trabajo`: la copia para el PDF (se termina por detrás).
+  const fotos = useRef(new Map<number, { vista: Blob; trabajo: Promise<Blob>; miniatura: string; recorte?: RecorteFoto }>())
+  /** Lo que se está haciendo con las fotos (se muestra con una ruedita); vacío si nada. */
+  const [ocupado, setOcupado] = useState('')
   const [recortando, setRecortando] = useState<number | null>(null)
   const siguienteFoto = useRef(0)
   const [miniaturas, setMiniaturas] = useState<Record<number, string>>({})
@@ -1106,9 +1108,11 @@ export default function App() {
     let fallidas = 0
     for (const archivo of archivos) {
       try {
-        const { trabajo, miniatura } = await prepararFoto(archivo)
+        const { vista, trabajo, miniatura } = await prepararFoto(archivo)
+        // Si la copia de trabajo fallara, se sabrá al crear el PDF; aquí no se deja un error suelto.
+        trabajo.catch(() => {})
         const id = siguienteFoto.current++
-        fotos.current.set(id, { archivo: trabajo, miniatura })
+        fotos.current.set(id, { vista, trabajo, miniatura })
         setMiniaturas((m) => ({ ...m, [id]: miniatura }))
         nuevas.push({ archivo: id, nombre: archivo.name, paginas: 1 })
       } catch (e) {
@@ -1127,14 +1131,17 @@ export default function App() {
     setRecortando(null)
     const foto = fotos.current.get(id)
     if (!foto) return
+    setOcupado('Recortando…')
     try {
-      const miniatura = await miniaturaDe(foto.archivo, recorte)
+      const miniatura = await miniaturaDe(foto.vista, recorte)
       URL.revokeObjectURL(foto.miniatura)
       fotos.current.set(id, { ...foto, miniatura, recorte })
       setMiniaturas((m) => ({ ...m, [id]: miniatura }))
     } catch (e) {
       console.error(e)
       setError('No se pudo recortar la foto.')
+    } finally {
+      setOcupado('')
     }
   }
 
@@ -1155,12 +1162,12 @@ export default function App() {
       for (const [i, h] of hojas.entries()) {
         const foto = fotos.current.get(h.archivo)
         if (!foto) throw new Error('Falta una foto')
-        setExito(`Preparando foto ${i + 1} de ${hojas.length}…`)
-        const jpg = await jpegDe(foto.archivo, h.giro, diseno, foto.recorte)
+        setOcupado(`Creando PDF… foto ${i + 1} de ${hojas.length}`)
+        const jpg = await jpegDe(await foto.trabajo, h.giro, diseno, foto.recorte)
         // Android: el IPC solo lleva texto; en base64 pesa la tercera parte que como lista de números.
         await invoke('fotos_agregar', puente ? { datos: await base64De(jpg) } : new Uint8Array(await jpg.arrayBuffer()))
       }
-      setExito('')
+      setOcupado(hojas.length > 1 ? 'Armando el PDF…' : 'Creando PDF…')
       let destino: string | null
       if (puente?.copiar && elegido) {
         const cache = await invoke<string>('fotos_en_cache', { diseno })
@@ -1186,6 +1193,7 @@ export default function App() {
       // Si falló después de elegir dónde guardar, el archivo vacío que se creó no se queda.
       if (elegido) puente?.borrar?.(elegido)
       setGuardando(false)
+      setOcupado('')
     }
   }
 
@@ -2084,9 +2092,17 @@ export default function App() {
           onAviso={setError}
         />
       )}
+      {ocupado && (
+        <div className="fondo-aviso ocupado" role="status" aria-live="polite">
+          <div className="tarjeta-aviso tarjeta-ocupado">
+            <span className="ruedita" aria-hidden="true" />
+            {ocupado}
+          </div>
+        </div>
+      )}
       {recortando !== null && fotos.current.get(recortando) && (
         <Recortar
-          archivo={fotos.current.get(recortando)!.archivo}
+          archivo={fotos.current.get(recortando)!.vista}
           inicial={fotos.current.get(recortando)!.recorte}
           onListo={(r) => void recortarFoto(recortando, r)}
           onCancelar={() => setRecortando(null)}
