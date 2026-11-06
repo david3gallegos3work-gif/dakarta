@@ -1,7 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
-import { ErrorGemini, SinConexion, preguntar, resumir, revisarClave, type Charla, type Pieza } from './gemini.ts'
+import { ErrorGemini, SinConexion, explicar, preguntar, revisarClave, tareaDocumento, traducirTexto, type Charla, type Pieza, type Tarea } from './gemini.ts'
 
 type Mensaje = { pregunta?: string; texto: string }
+/** Lo que se le pide: una tarea sobre las páginas, una pregunta, o explicar o traducir el texto elegido. */
+type Pedido = { tarea: Tarea } | { pregunta: string } | { explicar: string } | { traducir: string }
+
+const TAREAS: { tarea: Tarea; boton: string; titulo: string }[] = [
+  { tarea: 'resumir', boton: 'Resumir', titulo: 'Resumen' },
+  { tarea: 'puntos', boton: 'Puntos clave', titulo: 'Puntos clave' },
+  { tarea: 'estudio', boton: 'Preguntas de estudio', titulo: 'Preguntas de estudio' },
+  { tarea: 'traducir', boton: 'Traducir', titulo: 'Traducción' },
+]
+const corto = (t: string) => (t.length > 140 ? `${t.slice(0, 140)}…` : t)
 
 const mensajeDe = (e: unknown) => (e instanceof SinConexion || e instanceof ErrorGemini ? e.message : e instanceof Error ? e.message : String(e))
 
@@ -34,6 +44,7 @@ export function TextoGemini({ texto }: { texto: string }) {
 export function Gemini({
   paginas,
   clave,
+  elegido,
   onClave,
   cargarPiezas,
   onAbrirGoogle,
@@ -41,6 +52,8 @@ export function Gemini({
 }: {
   paginas: number
   clave: string
+  /** El texto seleccionado en el PDF, para explicarlo o traducirlo. */
+  elegido?: string
   /** Guarda la clave ya revisada con Google (vacía: desvincular). */
   onClave: (clave: string) => Promise<void>
   /** Las páginas `desde`..=`hasta` (desde 0) como las recibe Gemini: texto o, si son escaneadas, imagen. */
@@ -67,6 +80,15 @@ export function Gemini({
     fin.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [mensajes, pensando])
 
+  // Abierto desde «Explicar» con texto elegido: se explica enseguida (si ya está vinculado).
+  const explicado = useRef(false)
+  useEffect(() => {
+    if (!clave || !elegido || explicado.current) return
+    explicado.current = true
+    void trabajar({ explicar: elegido })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clave, elegido])
+
   const vincular = async () => {
     const c = borrador.trim()
     if (!c) return
@@ -91,19 +113,32 @@ export function Gemini({
     return leidas.current.piezas
   }
 
-  const trabajar = async (pedido: string | null) => {
-    if (pensando || !rangoValido) return
+  const trabajar = async (pedido: Pedido) => {
+    if (pensando || (!rangoValido && ('tarea' in pedido || 'pregunta' in pedido))) return
     setError('')
-    setPensando('Preparando las páginas…')
     try {
+      if ('explicar' in pedido) {
+        setPensando('Gemini está explicando el texto…')
+        const texto = await explicar(pedido.explicar, clave)
+        setMensajes((m) => [...m, { pregunta: `Explicar: «${corto(pedido.explicar)}»`, texto }])
+        return
+      }
+      if ('traducir' in pedido) {
+        setPensando('Gemini está traduciendo el texto…')
+        const texto = await traducirTexto(pedido.traducir, clave)
+        setMensajes((m) => [...m, { pregunta: `Traducir: «${corto(pedido.traducir)}»`, texto }])
+        return
+      }
+      setPensando('Preparando las páginas…')
       const p = await piezas()
-      if (pedido === null) {
-        const texto = await resumir(p, clave, setPensando)
-        setMensajes((m) => [...m, { pregunta: todas ? 'Resumen del PDF' : `Resumen de las páginas ${desde} a ${hasta}`, texto }])
+      if ('tarea' in pedido) {
+        const texto = await tareaDocumento(pedido.tarea, p, clave, setPensando)
+        const titulo = TAREAS.find((t) => t.tarea === pedido.tarea)!.titulo
+        setMensajes((m) => [...m, { pregunta: todas ? `${titulo} del PDF` : `${titulo} de las páginas ${desde} a ${hasta}`, texto }])
       } else {
         const historial: Charla[] = mensajes.filter((m) => m.pregunta).map((m) => ({ pregunta: m.pregunta!, respuesta: m.texto }))
-        const texto = await preguntar(pedido, historial, p, clave, setPensando)
-        setMensajes((m) => [...m, { pregunta: pedido, texto }])
+        const texto = await preguntar(pedido.pregunta, historial, p, clave, setPensando)
+        setMensajes((m) => [...m, { pregunta: pedido.pregunta, texto }])
         setPregunta('')
       }
     } catch (e) {
@@ -225,9 +260,28 @@ export function Gemini({
                 </label>
               )}
             </div>
-            <button className="grande gemini-resumir" disabled={!!pensando || !rangoValido} onClick={() => void trabajar(null)}>
-              Resumir
-            </button>
+            {elegido && (
+              <div className="gemini-elegido">
+                <p>
+                  <strong>Texto elegido:</strong> «{corto(elegido)}»
+                </p>
+                <div className="gemini-tareas">
+                  <button disabled={!!pensando} onClick={() => void trabajar({ explicar: elegido })}>
+                    Explicar
+                  </button>
+                  <button disabled={!!pensando} onClick={() => void trabajar({ traducir: elegido })}>
+                    Traducir
+                  </button>
+                </div>
+              </div>
+            )}
+            <div className="gemini-tareas">
+              {TAREAS.map((t) => (
+                <button key={t.tarea} disabled={!!pensando || !rangoValido} onClick={() => void trabajar({ tarea: t.tarea })}>
+                  {t.boton}
+                </button>
+              ))}
+            </div>
             {mensajes.map((m, i) => (
               <div key={i} className="gemini-mensaje">
                 {m.pregunta && <p className="gemini-pregunta">{m.pregunta}</p>}
@@ -251,7 +305,7 @@ export function Gemini({
             className="gemini-preguntar"
             onSubmit={(e) => {
               e.preventDefault()
-              if (pregunta.trim()) void trabajar(pregunta.trim())
+              if (pregunta.trim()) void trabajar({ pregunta: pregunta.trim() })
             }}
           >
             <input
