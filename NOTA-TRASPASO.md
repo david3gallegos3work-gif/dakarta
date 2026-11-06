@@ -2,7 +2,7 @@
 
 **Fecha y lugar:** 2026-11-03 22:20, en la PC. Actualizada el 2026-11-05 (Ecuador) desde la nube.
 **IA y aparato:** Claude Code. Revisión en la PC; arreglos en la nube.
-**Rama:** `main` (versión 0.4.14).
+**Rama:** `main` (versión 0.4.15).
 
 ## Hecho en la nube (2026-11-03 y 2026-11-04)
 
@@ -39,6 +39,7 @@
 - 0.4.12: fotos más rápidas (David lo notaba lento en el celular). Cada foto se abre una sola vez al agregarla (`prepararFoto`): de ahí salen una copia de trabajo de 2400 px y la miniatura; recortar y el PDF usan la copia. Las fotos aparecen de a una. Lado máximo en el PDF según el diseño (2000 px en A4, 1400 en documentos). Enderezar sin crear objetos por píxel. En Android la foto viaja en base64 (`{ datos }`, `desde_base64` en `lib.rs`) en vez de lista de números. En una PC: recortar de 276 a 90 ms y crear el PDF de 1,5 s a 0,4–0,8 s (4 fotos de 12 MP). Funciona sin internet (solo el aviso de versión nueva lo usa). Pruebas: 31 del motor, 26 de la pantalla.
 - 0.4.13: David seguía notando lento al tomar la foto y al recortar. Ahora al agregar salen enseguida la miniatura y una vista de 1280 px (recortar y la miniatura recortada usan la vista); la copia de 2400 px para el PDF se termina por detrás (`trabajo` es una promesa). Ruedita con texto: «Cargando foto…» en la lista, «Recortando…» y «Creando PDF… foto i de n». «1 hoja» y «1 marcada» en singular.
 - 0.4.14: David confirmó que ya va más rápido. Organizar/unir/fotos: tocar un espacio en blanco de la rejilla desmarca (se quitó el botón «Desmarcar»). «Últimos archivos» (inicio y panel ☰): una ✕ al final quita el archivo de la lista (no lo borra).
+- 0.4.15: con hojas marcadas en fotos o unir, arriba sale en amarillo «Para agregar otra foto (otro PDF), primero quita la selección: toca un espacio en blanco» (pedido de David). Comprimir PDF (panel ☰): «Buena calidad» (imágenes hasta 2000 px, JPEG 80) o «Lo más liviano» (1300 px, JPEG 60). `motor/comprimir.rs`: en una copia (con anotaciones y contraseña), recorre las imágenes de cada hoja y de sus Form, lee sus puntos, las promedia más chicas y las guarda como JPEG solo si ahorran al menos 10 %; no toca máscaras, Decode, CMYK, paletas, JPEG 2000 ni JPEG ya chicos. Guarda con garbage 3 y fuentes comprimidas. Se usó la API segura del crate (pdf_rewrite_images de MuPDF no está expuesta sin protección ante errores). Mensaje con los pesos («de 48 MB a 9,3 MB, 81 % menos», `src/comprimir.ts`); la copia queda en «Últimos archivos» y se sigue en el PDF de antes. Pruebas: 33 del motor, 28 de la pantalla.
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo

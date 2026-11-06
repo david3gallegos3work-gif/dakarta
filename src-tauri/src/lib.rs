@@ -3,7 +3,7 @@ mod motor;
 
 use std::sync::Mutex;
 
-use motor::{pdf_de_fotos, Anotacion, Diseno, Busqueda, Campo, Enlace, Hoja, Info, Motor, Palabra};
+use motor::{pdf_de_fotos, Anotacion, Diseno, Nivel, Busqueda, Campo, Enlace, Hoja, Info, Motor, Palabra};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_opener::OpenerExt;
@@ -198,6 +198,34 @@ async fn guardar_en_cache(
     let ruta = copia.to_string_lossy().into_owned();
     motor.guardar(ruta.clone(), hojas, proteccion)?;
     Ok(ruta)
+}
+
+/// Una copia comprimida: dónde quedó y cuánto pesaban el original y la copia (bytes).
+#[derive(serde::Serialize)]
+struct Comprimido {
+    ruta: String,
+    antes: u64,
+    despues: u64,
+}
+
+/// Android: deja la copia comprimida en la caché; la app la copia al destino elegido por el usuario.
+#[tauri::command]
+async fn comprimir_en_cache(app: AppHandle, motor: State<'_, Motor>, nivel: Nivel) -> Result<Comprimido, String> {
+    let ruta = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("comprimido.pdf");
+    let ruta = ruta.to_string_lossy().into_owned();
+    let (antes, despues) = motor.comprimir(ruta.clone(), nivel)?;
+    Ok(Comprimido { ruta, antes, despues })
+}
+
+/// Windows: pregunta dónde guardar la copia comprimida y la escribe ahí.
+#[tauri::command]
+async fn comprimir_copia(app: AppHandle, motor: State<'_, Motor>, nombre: String, nivel: Nivel) -> Result<Option<Comprimido>, String> {
+    let Some(ruta) = app.dialog().file().set_file_name(nombre).add_filter("PDF", &["pdf"]).blocking_save_file() else {
+        return Ok(None);
+    };
+    let ruta = ruta.into_path().map_err(|e| e.to_string())?.to_string_lossy().into_owned();
+    let (antes, despues) = motor.comprimir(ruta.clone(), nivel)?;
+    Ok(Some(Comprimido { ruta, antes, despues }))
 }
 
 /// Windows: pregunta dónde guardar y escribe la copia ahí.
@@ -454,6 +482,8 @@ pub fn run() {
     fotos_agregar,
     fotos_en_cache,
     fotos_guardar_copia,
+    comprimir_en_cache,
+    comprimir_copia,
     archivo_inicial,
     abrir_ruta,
     descargar_version,
