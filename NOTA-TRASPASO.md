@@ -2,7 +2,7 @@
 
 **Fecha y lugar:** 2026-11-05 (Ecuador, noche), en la nube (celular). David sigue mañana desde la PC.
 **IA y aparato:** Claude Code, celular/nube.
-**Rama:** `main` (versión 0.5.1, compilada y publicada; David la probó y quedó todo bien).
+**Rama:** `main` (versión 0.5.2, compilada al cerrar la sesión; falta que David la pruebe).
 
 ## Hecho en la nube (2026-11-03 y 2026-11-04)
 
@@ -45,11 +45,12 @@
 - David probó la 0.5.0 (Gemini resumir y preguntar): funciona muy bien.
 - 0.5.1: nombre del PDF abierto en una franja bajo la barra (`.titulo-pdf`, con «· sin guardar» si hay cambios). Gemini, segunda parte: «Puntos clave», «Preguntas de estudio» y «Traducir» sobre las páginas (`tareaDocumento` con una receta por tarea; traducir va en partes de 10 000 letras, hasta 15, y se juntan sin resumir) y «✨ Explicar» en la barra de seleccionar texto: abre Gemini y explica el texto elegido (también «Traducir» ese texto). Pruebas: 35 del motor, 39 de la pantalla. Menú lateral nuevo (David eligió el diseño B con los últimos archivos en lista, `src/MenuLateral.tsx`): el PDF abierto arriba, «Abrir otro PDF», últimos archivos (el abierto marcado «ABIERTO», con ✕), Gemini destacado, herramientas en cuadrícula (Índice —abre el índice en el mismo panel—, Organizar, Unir PDFs, Comprimir, Contraseña, Escáner; «Quitar contraseña» si tiene) y «Dakarta · versión y descargas» con la versión (o «Hay una versión nueva»). «Crear PDF desde fotos» pasa a llamarse «Escáner» (pedido de David).
 - David probó la 0.5.1 (menú nuevo, Escáner, nombre del PDF arriba, Gemini segunda parte): quedó todo bien.
+- 0.5.2: barra de arriba en dos filas (David eligió el diseño C entre tres): fila 1 ☰, nombre del PDF (con «· sin guardar»), buscar (ícono de trazo, ya no el emoji 🔍) y compartir; fila 2 en grupos con fondo: herramientas (seleccionar texto, editar, modo noche), «Pág. N / total» y zoom «− % +». En pantallas de hasta 400 px se esconde «Pág.» para que entre. Se quitó la franja aparte del nombre (ahora está en la fila 1). Sin PDF abierto la barra queda como antes (solo el modo noche).
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo
 
-Hasta la 0.5.1 está todo hecho, publicado y probado por David: contraseña, escáner (con cédula y papeleta, recortar y enderezar), comprimir, Gemini completo (resumir, preguntar, puntos clave, preguntas de estudio, traducir, explicar lo seleccionado) y el menú lateral nuevo. No quedó nada a medias.
+Hasta la 0.5.1 está todo hecho, publicado y probado por David (la 0.5.2, barra en dos filas, quedó compilándose: probarla primero): contraseña, escáner (con cédula y papeleta, recortar y enderezar), comprimir, Gemini completo (resumir, preguntar, puntos clave, preguntas de estudio, traducir, explicar lo seleccionado) y el menú lateral nuevo. No quedó nada a medias.
 
 ## Lo que se comprobó
 
@@ -87,9 +88,10 @@ Búsqueda, últimos archivos, compartir, selector de Android con permiso guardab
 
 ## Qué falta, en orden
 
-1. Fase 6, lo que queda (preguntarle a David por cuál empezar): OCR sin conexión (texto de páginas escaneadas), leer en voz alta (TTS de Android/Windows), convertir PDF a texto. Lo de Word quedó descartado.
-2. Pendientes viejos por comprobar en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
-3. Hechos: Fases 1, 2, 3 y 5; de la 6, contraseña (0.4.7), escáner (0.4.9) y comprimir (0.4.15). Fase 4 descartada (0.4.4).
+1. David prueba la 0.5.2 (barra de arriba en dos filas).
+2. Fase 6, lo que queda (preguntarle a David por cuál empezar): OCR sin conexión (texto de páginas escaneadas), leer en voz alta (TTS de Android/Windows), convertir PDF a texto. Lo de Word quedó descartado.
+3. Pendientes viejos por comprobar en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
+4. Hechos: Fases 1, 2, 3 y 5; de la 6, contraseña (0.4.7), escáner (0.4.9) y comprimir (0.4.15). Fase 4 descartada (0.4.4).
 
 ## Pendiente para el celular
 

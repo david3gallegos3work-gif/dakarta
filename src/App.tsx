@@ -1523,131 +1523,137 @@ export default function App() {
 
   return (
     <div className={noche ? 'app noche' : 'app'}>
-      <header className="barra">
-        {doc && (
+      <header className={doc ? 'barra barra-doble' : 'barra'}>
+        {doc ? (
           <>
-            <button onClick={() => setVerIndice((x) => !x)} aria-pressed={verIndice} aria-label="Índice" title="Índice">
-              ☰
-            </button>
-            <button
-              onClick={() => {
-                const compartir = () => {
-                  setVerIndice(false)
-                  // Android: menú de compartir del sistema. Windows: la carpeta con el PDF seleccionado.
-                  if (window.DakartaAndroid?.compartir) {
-                    window.DakartaAndroid.compartir(rutaActual, nombreActual)
-                  } else {
-                    invoke('mostrar_archivo', { ruta: rutaActual }).catch((e) => {
-                      console.error(e)
-                      setError('No se pudo abrir la carpeta del archivo.')
-                    })
-                  }
-                }
-                if (!sucio) return compartir()
-                setPregunta({
-                  titulo: 'Hay cambios sin guardar',
-                  texto: 'Se compartirá el archivo original, sin los cambios.',
-                  si: 'Compartir',
-                  no: 'Cancelar',
-                  alSi: compartir,
-                })
-              }}
-              aria-label="Compartir"
-              title="Compartir"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M8.8 10.6 15.2 6.4M8.8 13.4l6.4 4.2" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
-                <circle cx="18" cy="5" r="3.2" fill="currentColor" />
-                <circle cx="6" cy="12" r="3.2" fill="currentColor" />
-                <circle cx="18" cy="19" r="3.2" fill="currentColor" />
-              </svg>
-            </button>
-            <button
-              onClick={() => (verBuscar ? cerrarBuscar() : setVerBuscar(true))}
-              aria-pressed={verBuscar}
-              aria-label="Buscar en el documento"
-              title="Buscar en el documento"
-            >
-              🔍
-            </button>
-            {!editando && (
+            {/* Fila 1: menú, el PDF abierto, buscar y compartir. */}
+            <div className="barra-fila">
+              <button onClick={() => setVerIndice((x) => !x)} aria-pressed={verIndice} aria-label="Índice" title="Índice">
+                ☰
+              </button>
+              <span className="barra-nombre" title={nombreActual || doc.info.nombre}>
+                {nombreLegible(nombreActual || doc.info.nombre)}
+                {sucio && <small> · sin guardar</small>}
+              </span>
               <button
-                onClick={() => {
-                  cerrarBuscar()
-                  setVerIndice(false)
-                  if (seleccionTexto) {
-                    window.getSelection()?.removeAllRanges()
-                    textoSeleccionado.current = ''
-                  }
-                  setSeleccionTexto(!seleccionTexto)
-                }}
-                aria-pressed={seleccionTexto}
-                aria-label="Seleccionar texto"
-                title="Seleccionar texto para copiar"
+                onClick={() => (verBuscar ? cerrarBuscar() : setVerBuscar(true))}
+                aria-pressed={verBuscar}
+                aria-label="Buscar en el documento"
+                title="Buscar en el documento"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M5 6V4h14v2M12 4v16M8 20h8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" strokeWidth="2.2" />
+                  <path d="M20 20l-4.2-4.2" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
                 </svg>
               </button>
-            )}
-            <button
-              onClick={() => (editando ? salirEditar() : entrarEditar())}
-              aria-pressed={editando}
-              aria-label="Editar PDF"
-              title="Editar PDF"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 20h4L19 9l-4-4L4 16v4z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-              </svg>
-            </button>
-            <span className="pag">
-              <input
-                key={actual}
-                type="number"
-                inputMode="numeric"
-                min={1}
-                max={doc.info.paginas}
-                defaultValue={actual + 1}
-                aria-label="Ir a la página"
-                onKeyDown={(e) => {
-                  if (e.key !== 'Enter') return
-                  ir(Math.min(doc.info.paginas, Math.max(1, Number(e.currentTarget.value) || 1)) - 1)
-                  e.currentTarget.blur()
+              <button
+                onClick={() => {
+                  const compartir = () => {
+                    setVerIndice(false)
+                    // Android: menú de compartir del sistema. Windows: la carpeta con el PDF seleccionado.
+                    if (window.DakartaAndroid?.compartir) {
+                      window.DakartaAndroid.compartir(rutaActual, nombreActual)
+                    } else {
+                      invoke('mostrar_archivo', { ruta: rutaActual }).catch((e) => {
+                        console.error(e)
+                        setError('No se pudo abrir la carpeta del archivo.')
+                      })
+                    }
+                  }
+                  if (!sucio) return compartir()
+                  setPregunta({
+                    titulo: 'Hay cambios sin guardar',
+                    texto: 'Se compartirá el archivo original, sin los cambios.',
+                    si: 'Compartir',
+                    no: 'Cancelar',
+                    alSi: compartir,
+                  })
                 }}
-              />
-              / {doc.info.paginas}
-            </span>
-            <button onClick={() => cambiarZoom(zoom / 1.25)} aria-label="Alejar" title="Alejar">
-              −
-            </button>
-            <button onClick={() => cambiarZoom(1)} title="Ajustar al ancho" className="porcentaje">
-              {Math.round(zoom * 100)}%
-            </button>
-            <button onClick={() => cambiarZoom(zoom * 1.25)} aria-label="Acercar" title="Acercar">
-              +
-            </button>
+                aria-label="Compartir"
+                title="Compartir"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M8.8 10.6 15.2 6.4M8.8 13.4l6.4 4.2" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
+                  <circle cx="18" cy="5" r="3.2" fill="currentColor" />
+                  <circle cx="6" cy="12" r="3.2" fill="currentColor" />
+                  <circle cx="18" cy="19" r="3.2" fill="currentColor" />
+                </svg>
+              </button>
+            </div>
+            {/* Fila 2, en grupos: herramientas, página y zoom. */}
+            <div className="barra-fila barra-grupos">
+              <span className="grupo">
+                {!editando && (
+                  <button
+                    onClick={() => {
+                      cerrarBuscar()
+                      setVerIndice(false)
+                      if (seleccionTexto) {
+                        window.getSelection()?.removeAllRanges()
+                        textoSeleccionado.current = ''
+                      }
+                      setSeleccionTexto(!seleccionTexto)
+                    }}
+                    aria-pressed={seleccionTexto}
+                    aria-label="Seleccionar texto"
+                    title="Seleccionar texto para copiar"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M5 6V4h14v2M12 4v16M8 20h8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                )}
+                <button
+                  onClick={() => (editando ? salirEditar() : entrarEditar())}
+                  aria-pressed={editando}
+                  aria-label="Editar PDF"
+                  title="Editar PDF"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 20h4L19 9l-4-4L4 16v4z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                <button onClick={() => setNoche((x) => !x)} aria-pressed={noche} aria-label="Modo noche" title="Modo noche">
+                  {noche ? '☀' : '☾'}
+                </button>
+              </span>
+              <span className="pag grupo">
+                <label>Pág.</label>
+                <input
+                  key={actual}
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={doc.info.paginas}
+                  defaultValue={actual + 1}
+                  aria-label="Ir a la página"
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return
+                    ir(Math.min(doc.info.paginas, Math.max(1, Number(e.currentTarget.value) || 1)) - 1)
+                    e.currentTarget.blur()
+                  }}
+                />
+                / {doc.info.paginas}
+              </span>
+              <span className="grupo">
+                <button onClick={() => cambiarZoom(zoom / 1.25)} aria-label="Alejar" title="Alejar">
+                  −
+                </button>
+                <button onClick={() => cambiarZoom(1)} title="Ajustar al ancho" className="porcentaje">
+                  {Math.round(zoom * 100)}%
+                </button>
+                <button onClick={() => cambiarZoom(zoom * 1.25)} aria-label="Acercar" title="Acercar">
+                  +
+                </button>
+              </span>
+            </div>
           </>
+        ) : (
+          <button onClick={() => setNoche((x) => !x)} aria-pressed={noche} aria-label="Modo noche" title="Modo noche" className="derecha">
+            {noche ? '☀' : '☾'}
+          </button>
         )}
-        <button
-          onClick={() => setNoche((x) => !x)}
-          aria-pressed={noche}
-          aria-label="Modo noche"
-          title="Modo noche"
-          className={doc ? '' : 'derecha'}
-        >
-          {noche ? '☀' : '☾'}
-        </button>
       </header>
-      {doc && (
-        // Cuál PDF está abierto (con varios recientes, si no, se confunde).
-        <div className="titulo-pdf" title={nombreActual || doc.info.nombre}>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M6 2h9l5 5v15H6z M14 2v6h6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-          </svg>
-          <span>{nombreLegible(nombreActual || doc.info.nombre)}</span>
-          {sucio && <small>· sin guardar</small>}
-        </div>
-      )}
 
       {verBuscar && doc && (
         <div className="buscar">
