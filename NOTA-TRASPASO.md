@@ -2,7 +2,7 @@
 
 **Fecha y lugar:** 2026-11-03 22:20, en la PC. Actualizada el 2026-11-05 (Ecuador) desde la nube.
 **IA y aparato:** Claude Code. Revisión en la PC; arreglos en la nube.
-**Rama:** `main` (versión 0.4.11).
+**Rama:** `main` (versión 0.4.12).
 
 ## Hecho en la nube (2026-11-03 y 2026-11-04)
 
@@ -36,6 +36,7 @@
 - 0.4.9: crear PDF desde fotos (inicio y panel ☰). Usa la pantalla de organizar en modo `fotos` (marcar, mover, girar, duplicar, quitar, deshacer): «+ Fotos» (galería, varias) y, en Android, «Cámara» (`<input capture>`, que wry abre con la cámara del sistema; `parchar-android.py` agrega `<queries>` de IMAGE_CAPTURE para Android 11+). La pantalla endereza, gira y achica cada foto (lado máximo 2400 px, JPEG 85 %, `src/fotos.ts`) y las manda como bytes (`fotos_agregar`); el motor arma el PDF (`motor/fotos.rs`): «Hoja A4» (por omisión, la foto centrada con margen; A4 de lado si la foto es apaisada) o la hoja con la forma de la foto. Luego se guarda donde se elija y se abre. Diseños: «Una por hoja A4», «Una por hoja, tamaño de la foto» y «Cédula y papeleta (tamaño real)»: dos por fila a 85,6 mm de ancho (tarjeta ISO), en hojas A4, como la copia de cédula de las fotocopiadoras (pedido de David con una imagen de ejemplo). «Recortar» (una foto marcada): cuatro esquinas libres (`src/Recortar.tsx`); si el documento salió torcido o de medio lado, se endereza a un rectángulo (perspectiva, `deRectanguloA` en `src/fotos.ts`). El giro de 90° es «Girar». Pruebas: 29 del motor, 26 de la pantalla. Por comprobar en el celular: la cámara, recortar con el dedo, fotos HEIC (si no se leen, avisa).
 - 0.4.10: David probó la 0.4.9 en Android: todo bien, pero el PDF de fotos no se guardaba. Causa: en Android el IPC de Tauri va por postMessage (solo texto) y manda los bytes de la foto como lista de números (`InvokeBody::Json`); `fotos_agregar` solo aceptaba `Raw`. Ahora acepta los dos (`bytes_de` en `lib.rs`, con prueba). Pruebas: 30 del motor.
 - 0.4.11: en crear PDF desde fotos, el selector «Diseño» va fijo arriba de las fotos (antes estaba abajo y se escondía al marcar una foto; David no lo encontraba).
+- 0.4.12: fotos más rápidas (David lo notaba lento en el celular). Cada foto se abre una sola vez al agregarla (`prepararFoto`): de ahí salen una copia de trabajo de 2400 px y la miniatura; recortar y el PDF usan la copia. Las fotos aparecen de a una. Lado máximo en el PDF según el diseño (2000 px en A4, 1400 en documentos). Enderezar sin crear objetos por píxel. En Android la foto viaja en base64 (`{ datos }`, `desde_base64` en `lib.rs`) en vez de lista de números. En una PC: recortar de 276 a 90 ms y crear el PDF de 1,5 s a 0,4–0,8 s (4 fotos de 12 MP). Funciona sin internet (solo el aviso de versión nueva lo usa). Pruebas: 31 del motor, 26 de la pantalla.
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo

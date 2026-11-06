@@ -153,6 +153,27 @@ export function Organizar({
       setAgregando(false)
     }
   }
+  /** Fotos: se preparan de a una y cada una aparece apenas está lista (deshacer quita todas las de esta vez). */
+  const agregarFotos = async (archivos: File[]) => {
+    if (!onFotos) return
+    setAgregando(true)
+    setHistorial((h) => [...h, lista])
+    try {
+      for (const archivo of archivos) {
+        const nuevas = await onFotos([archivo])
+        if (!nuevas.length) continue
+        const fichas = nuevas.flatMap((f) => {
+          const l = fichasDe(f, siguienteId.current)
+          siguienteId.current += l.length
+          return l
+        })
+        setFuentes((x) => [...x, ...nuevas])
+        setLista((l) => [...l, ...fichas])
+      }
+    } finally {
+      setAgregando(false)
+    }
+  }
   const color = (f: Ficha) => COLORES_ARCHIVO[Math.max(0, fuentes.findIndex((x) => x.archivo === f.archivo)) % COLORES_ARCHIVO.length]
   const clave = (f: Ficha) => `${f.archivo}:${f.pagina}`
 
@@ -207,7 +228,7 @@ export function Organizar({
         onChange={(e) => {
           const archivos = [...(e.currentTarget.files ?? [])]
           e.currentTarget.value = ''
-          if (archivos.length && onFotos) void agregar(() => onFotos(archivos))
+          if (archivos.length) void agregarFotos(archivos)
         }}
       />
     </label>
