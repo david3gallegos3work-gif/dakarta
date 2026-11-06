@@ -572,3 +572,94 @@ fn documentos_van_a_tamano_real_dos_por_fila() {
     assert!(hojas[0].1[0].caja.3 <= 242.7);
 }
 
+
+/// Una «foto» con detalle (no se comprime casi nada), en JPEG de buena calidad.
+fn foto_grande(ancho: u16, alto: u16) -> Vec<u8> {
+    let mut puntos = Vec::with_capacity(ancho as usize * alto as usize * 3);
+    let mut semilla = 7u32;
+    for y in 0..alto as u32 {
+        for x in 0..ancho as u32 {
+            semilla = semilla.wrapping_mul(1103515245).wrapping_add(12345);
+            let ruido = (semilla >> 24) as u8 / 4;
+            puntos.extend_from_slice(&[(x / 8) as u8 ^ ruido, (y / 8) as u8, ((x + y) / 16) as u8 ^ ruido]);
+        }
+    }
+    let mut jpg = Vec::new();
+    jpeg_encoder::Encoder::new(&mut jpg, 95).encode(&puntos, ancho, alto, jpeg_encoder::ColorType::Rgb).unwrap();
+    jpg
+}
+
+#[test]
+fn comprimir_achica_las_imagenes_grandes_y_conserva_la_contrasena() {
+    use super::comprimir::{comprimir_imagenes, comprimir_y_guardar, Nivel};
+    let carpeta = std::env::temp_dir().join(format!("dakarta-comprimir-{}", std::process::id()));
+    std::fs::create_dir_all(&carpeta).unwrap();
+    let ruta = |n: &str| carpeta.join(n).to_string_lossy().into_owned();
+    let peso = |r: &str| std::fs::metadata(r).unwrap().len();
+    // Un PDF de dos fotos grandes, con contraseña.
+    pdf_de_fotos(&[foto_grande(3000, 2000), foto_grande(2000, 3000)], Diseno::A4, &ruta("fotos.pdf")).unwrap();
+    let original = abrir_pdf(&ruta("fotos.pdf"), None).unwrap();
+    guardar_doc_con(&original, &ruta("clave.pdf"), &Proteccion::de("abc").unwrap(), None).unwrap();
+    let doc = abrir_pdf(&ruta("clave.pdf"), Some("abc")).unwrap();
+    comprimir_y_guardar(&doc, &ruta("ligera.pdf"), Some("abc"), Nivel::Ligera).unwrap();
+    comprimir_y_guardar(&doc, &ruta("fuerte.pdf"), Some("abc"), Nivel::Fuerte).unwrap();
+    let (antes, ligera, fuerte) = (peso(&ruta("clave.pdf")), peso(&ruta("ligera.pdf")), peso(&ruta("fuerte.pdf")));
+    assert!(ligera < antes * 3 / 4, "ligera: {antes} -> {ligera}");
+    assert!(fuerte < ligera, "fuerte: {ligera} -> {fuerte}");
+    // Sigue con contraseña, con sus dos hojas, y las fotos se ven.
+    assert_eq!(abrir_pdf(&ruta("fuerte.pdf"), None).err().unwrap(), PIDE_CLAVE);
+    let comprimido = abrir_pdf(&ruta("fuerte.pdf"), Some("abc")).unwrap();
+    assert_eq!(comprimido.page_count().unwrap(), 2);
+    assert!(pintar(&comprimido, 0, 200).unwrap().len() > pintar(&pdf_vacio(), 0, 200).unwrap().len() * 2);
+    // El PDF abierto no cambió.
+    assert_eq!(peso(&ruta("clave.pdf")), antes);
+
+    // Una imagen sin pérdida (como un PNG o un escaneo) grande también se achica.
+    let mut px = Pixmap::new_with_w_h(&Colorspace::device_rgb(), 2600, 1800, false).unwrap();
+    let mut semilla = 1u32;
+    for (i, v) in px.samples_mut().iter_mut().enumerate() {
+        semilla = semilla.wrapping_mul(1103515245).wrapping_add(12345);
+        *v = ((i / 3 % 2600) as u32 / 12 + (semilla >> 26)) as u8;
+    }
+    let mut sin_perdida = PdfDocument::new();
+    let img = mupdf::Image::from_pixmap(&px).unwrap();
+    let ancho_antes = img.width();
+    pdf_con_imagen(&mut sin_perdida, &img);
+    guardar_doc(&sin_perdida, &ruta("png.pdf")).unwrap();
+    let doc = abrir_pdf(&ruta("png.pdf"), None).unwrap();
+    comprimir_y_guardar(&doc, &ruta("png-fuerte.pdf"), None, Nivel::Fuerte).unwrap();
+    assert!(peso(&ruta("png-fuerte.pdf")) < peso(&ruta("png.pdf")) / 2, "{} -> {}", peso(&ruta("png.pdf")), peso(&ruta("png-fuerte.pdf")));
+    assert_eq!(ancho_antes, 2600);
+    let mut chica = abrir_pdf(&ruta("fuerte.pdf"), Some("abc")).unwrap();
+    assert_eq!(comprimir_imagenes(&mut chica, Nivel::Fuerte).unwrap(), 0, "ya están chicas: no se vuelven a comprimir");
+    std::fs::remove_dir_all(&carpeta).unwrap();
+}
+
+#[test]
+fn achicar_promedia_sin_deformar() {
+    use super::comprimir::achicar;
+    // 4×2 en gris → lado máximo 2: queda 2×1 con el promedio de cada bloque.
+    let (w, h, p) = achicar(&[0, 100, 200, 200, 0, 100, 200, 200], 4, 2, 1, 2);
+    assert_eq!((w, h), (2, 1));
+    assert_eq!(p, [50, 200]);
+    // Si ya es chica, queda igual.
+    assert_eq!(achicar(&[1, 2, 3], 1, 1, 3, 10), (1, 1, vec![1, 2, 3]));
+}
+
+/// Una hoja con una sola imagen.
+fn pdf_con_imagen(doc: &mut PdfDocument, img: &mupdf::Image) {
+    let foto = doc.add_image(img).unwrap();
+    let mut objetos = doc.new_dict().unwrap();
+    objetos.dict_put("Im", foto).unwrap();
+    let mut recursos = doc.new_dict().unwrap();
+    recursos.dict_put("XObject", objetos).unwrap();
+    let dibujo = mupdf::Buffer::from_bytes(b"q 595 0 0 842 0 0 cm /Im Do Q").unwrap();
+    let contenido = doc.add_stream(&dibujo, None, false).unwrap();
+    let mut hoja = doc.new_dict().unwrap();
+    hoja.dict_put("Type", PdfObject::new_name("Page").unwrap()).unwrap();
+    hoja.dict_put("MediaBox", doc.new_object_from_str("[0 0 595 842]").unwrap()).unwrap();
+    hoja.dict_put("Resources", recursos).unwrap();
+    hoja.dict_put("Contents", contenido).unwrap();
+    let hoja = doc.add_object(&hoja).unwrap();
+    doc.insert_page(0, &hoja).unwrap();
+}

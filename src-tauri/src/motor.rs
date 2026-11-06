@@ -21,6 +21,7 @@ use crate::cache::Cache;
 mod anotar;
 mod busqueda;
 mod capas;
+mod comprimir;
 mod formulario;
 mod fotos;
 mod organizar;
@@ -31,6 +32,8 @@ use busqueda::*;
 use capas::*;
 use formulario::*;
 use organizar::{organizar_y_guardar, unir_y_guardar, ABIERTO};
+pub use comprimir::Nivel;
+use comprimir::comprimir_y_guardar;
 pub use fotos::{pdf_de_fotos, Diseno};
 pub use organizar::Hoja;
 use pintar::*;
@@ -309,6 +312,8 @@ enum Pedido {
     /// Con `hojas`, guarda un PDF nuevo con esas hojas en ese orden (organizar o extraer páginas).
     /// Con `proteccion`, una copia con esa contraseña (vacía: sin contraseña).
     Guardar { destino: String, hojas: Option<Vec<Hoja>>, proteccion: Option<String>, resp: Sender<Result<(), String>> },
+    /// Guarda una copia comprimida; devuelve cuánto pesaban el original y la copia (en bytes).
+    Comprimir { destino: String, nivel: Nivel, resp: Sender<Result<(u64, u64), String>> },
     /// Abre otro PDF para unirlo; devuelve su número y cuántas páginas tiene.
     AbrirAgregado { ruta: String, archivo: Option<File>, clave: Option<String>, resp: Sender<Result<(usize, i32), String>> },
     CerrarAgregados,
@@ -598,6 +603,19 @@ impl Motor {
                             };
                             let _ = resp.send(r);
                         }
+                        Pedido::Comprimir { destino, nivel, resp } => {
+                            let r = match &abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some(_) if mismo_archivo(&ruta_abierta, &destino) => Err(
+                                    "No se puede guardar encima del PDF abierto. Elige otro nombre.".into(),
+                                ),
+                                Some((doc, _)) => comprimir_y_guardar(doc, &destino, clave_abierta.as_deref(), nivel).map(|()| {
+                                    let peso = |r: &str| std::fs::metadata(r).map(|m| m.len()).unwrap_or(0);
+                                    (peso(&ruta_abierta), peso(&destino))
+                                }),
+                            };
+                            let _ = resp.send(r);
+                        }
                         Pedido::Pagina(p) => pendientes.push(p),
                     }
                 }
@@ -833,6 +851,12 @@ impl Motor {
     pub fn guardar(&self, destino: String, hojas: Option<Vec<Hoja>>, proteccion: Option<String>) -> Result<(), String> {
         let (tx, rx) = mpsc::channel();
         self.0.send(Pedido::Guardar { destino, hojas, proteccion, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
+    pub fn comprimir(&self, destino: String, nivel: Nivel) -> Result<(u64, u64), String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Comprimir { destino, nivel, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 
