@@ -16,7 +16,7 @@ import {
   TAMANOS_SELLO,
   TAMANOS_TEXTO,
 } from './opciones.ts'
-import { jpegDe, miniaturaDe, nombreDeFotos, type Diseno, type Recorte as RecorteFoto } from './fotos.ts'
+import { base64De, jpegDe, miniaturaDe, nombreDeFotos, prepararFoto, type Diseno, type Recorte as RecorteFoto } from './fotos.ts'
 import { Organizar, type Modo } from './Organizar.tsx'
 import { ABIERTO, type Fuente } from './organizar.ts'
 import { Paginas } from './Paginas.tsx'
@@ -138,7 +138,8 @@ export default function App() {
   // Pantalla de organizar páginas (un PDF) o de unir PDFs, con los PDFs cuyas hojas muestra al abrirse.
   const [organizar, setOrganizar] = useState<{ modo: Modo; fuentes: Fuente[] } | null>(null)
   // Crear PDF desde fotos: cada foto elegida (por su número) y su miniatura.
-  const fotos = useRef(new Map<number, { archivo: File; miniatura: string; recorte?: RecorteFoto }>())
+  // `archivo`: la copia de trabajo de la foto (más liviana que la original).
+  const fotos = useRef(new Map<number, { archivo: Blob; miniatura: string; recorte?: RecorteFoto }>())
   const [recortando, setRecortando] = useState<number | null>(null)
   const siguienteFoto = useRef(0)
   const [miniaturas, setMiniaturas] = useState<Record<number, string>>({})
@@ -1105,9 +1106,9 @@ export default function App() {
     let fallidas = 0
     for (const archivo of archivos) {
       try {
-        const miniatura = await miniaturaDe(archivo)
+        const { trabajo, miniatura } = await prepararFoto(archivo)
         const id = siguienteFoto.current++
-        fotos.current.set(id, { archivo, miniatura })
+        fotos.current.set(id, { archivo: trabajo, miniatura })
         setMiniaturas((m) => ({ ...m, [id]: miniatura }))
         nuevas.push({ archivo: id, nombre: archivo.name, paginas: 1 })
       } catch (e) {
@@ -1155,7 +1156,9 @@ export default function App() {
         const foto = fotos.current.get(h.archivo)
         if (!foto) throw new Error('Falta una foto')
         setExito(`Preparando foto ${i + 1} de ${hojas.length}…`)
-        await invoke('fotos_agregar', await jpegDe(foto.archivo, h.giro, foto.recorte))
+        const jpg = await jpegDe(foto.archivo, h.giro, diseno, foto.recorte)
+        // Android: el IPC solo lleva texto; en base64 pesa la tercera parte que como lista de números.
+        await invoke('fotos_agregar', puente ? { datos: await base64De(jpg) } : new Uint8Array(await jpg.arrayBuffer()))
       }
       setExito('')
       let destino: string | null

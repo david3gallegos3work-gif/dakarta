@@ -335,17 +335,49 @@ fn fotos_agregar(pedido: tauri::ipc::Request<'_>, fotos: State<'_, Fotos>) -> Re
     Ok(())
 }
 
+/// La foto llega como bytes (Windows), como `{ datos: "<base64>" }` (Android: su IPC solo lleva texto, y así
+/// pesa la tercera parte que como lista de números) o como lista de números.
 fn bytes_de(cuerpo: &tauri::ipc::InvokeBody) -> Result<Vec<u8>, String> {
+    let mal = || "La foto no llegó bien.".to_string();
     let bytes = match cuerpo {
         tauri::ipc::InvokeBody::Raw(b) => b.clone(),
-        tauri::ipc::InvokeBody::Json(v) => {
-            <Vec<u8> as serde::Deserialize>::deserialize(v.clone()).map_err(|_| "La foto no llegó bien.".to_string())?
-        }
+        tauri::ipc::InvokeBody::Json(v) => match v.get("datos").and_then(|d| d.as_str()) {
+            Some(texto) => desde_base64(texto).ok_or_else(mal)?,
+            None => <Vec<u8> as serde::Deserialize>::deserialize(v.clone()).map_err(|_| mal())?,
+        },
     };
     if bytes.is_empty() {
         return Err("La foto no llegó bien.".into());
     }
     Ok(bytes)
+}
+
+/// Base64 común (el de `FileReader.readAsDataURL`), sin saltos de línea.
+fn desde_base64(texto: &str) -> Option<Vec<u8>> {
+    let valor = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32)
+    };
+    let limpio = texto.trim_end_matches('=').as_bytes();
+    if limpio.len() % 4 == 1 {
+        return None;
+    }
+    let mut salida = Vec::with_capacity(limpio.len() * 3 / 4);
+    for grupo in limpio.chunks(4) {
+        let mut n = 0u32;
+        for (i, &c) in grupo.iter().enumerate() {
+            n |= valor(c)? << (18 - 6 * i);
+        }
+        let bytes = [(n >> 16) as u8, (n >> 8) as u8, n as u8];
+        salida.extend_from_slice(&bytes[..grupo.len() - 1]);
+    }
+    Some(salida)
 }
 
 #[cfg(test)]
@@ -358,6 +390,17 @@ mod pruebas_ipc {
         // Así la manda Tauri en Android.
         assert_eq!(super::bytes_de(&InvokeBody::Json(serde_json::json!([255, 216, 255]))).unwrap(), [255, 216, 255]);
         assert!(super::bytes_de(&InvokeBody::Json(serde_json::json!({ "a": 1 }))).is_err());
+        // Android: en base64 («/9j/» es el comienzo de todo JPEG).
+        assert_eq!(super::bytes_de(&InvokeBody::Json(serde_json::json!({ "datos": "/9j/" }))).unwrap(), [255, 216, 255]);
+        assert!(super::bytes_de(&InvokeBody::Json(serde_json::json!({ "datos": "no*es" }))).is_err());
+    }
+
+    #[test]
+    fn base64_igual_que_el_del_navegador() {
+        for (texto, bytes) in [("", &b""[..]), ("Zg==", b"f"), ("Zm8=", b"fo"), ("Zm9v", b"foo"), ("Zm9vYmFy", b"foobar"), ("8J+Ygg==", "😂".as_bytes())] {
+            assert_eq!(super::desde_base64(texto).unwrap(), bytes, "{texto}");
+        }
+        assert!(super::desde_base64("Z").is_none());
         assert!(super::bytes_de(&InvokeBody::Json(serde_json::json!([]))).is_err());
     }
 }
