@@ -336,11 +336,6 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .noche .gemini-fila input, .noche .gemini-preguntar input, .noche .gemini-rango input[type="number"] { background: #2f2f2f; border-color: #555; color: #eee; }
 .noche .gemini-copiar { background: #2f2f2f; border-color: #555; }
 .noche .gemini-nota { color: #aaa; }
-.titulo-pdf { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 12px 5px; background: #0d47a1; color: #e3f2fd; font-size: 13px; }
-.titulo-pdf svg { flex: none; width: 15px; height: 15px; }
-.titulo-pdf span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.titulo-pdf small { flex: none; color: #ffcc80; font-size: 12px; }
-.noche .titulo-pdf { background: #000; color: #bbb; }
 /* Menú lateral (diseño B): el PDF abierto, últimos archivos en lista, Gemini, herramientas en cuadrícula y versión. */
 .menu-lateral { display: flex; flex-direction: column; gap: 10px; padding: 0 12px 16px; color: #1f2937; }
 .menu-lateral h3, .menu-indice h3 { margin: 6px 4px 0; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: #6b7280; }
@@ -397,3 +392,24 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .noche .indice .menu-herramienta { background: #2a2a2a; color: #eee; }
 .noche .indice .menu-version { border-color: #3a3a3a; color: #eee; }
 .noche .menu-ficha { filter: brightness(0.85); }
+/* Barra con un PDF abierto: dos filas. Arriba menú, nombre, buscar y compartir; abajo grupos (herramientas, página, zoom). */
+.barra-doble { flex-direction: column; align-items: stretch; gap: 4px; overflow: visible; padding-bottom: 8px; }
+.barra-fila { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.barra-nombre { flex: 1; min-width: 0; padding: 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; }
+.barra-nombre small { color: #ffcc80; font-size: 12px; font-weight: 400; }
+.barra-grupos { justify-content: space-between; gap: 6px; }
+.barra .grupo { display: flex; align-items: center; gap: 0; height: 38px; padding: 0 3px; border-radius: 19px; background: rgba(255, 255, 255, 0.16); }
+.barra .grupo button { min-width: 34px; height: 34px; padding: 0 6px; border-radius: 17px; }
+.barra .grupo.pag { margin: 0; padding: 0 8px; gap: 5px; font-size: 14px; }
+.barra .grupo.pag label { opacity: 0.9; }
+.barra .grupo.pag input { width: 44px; height: 28px; border-radius: 8px; }
+.barra .grupo .porcentaje { min-width: 48px; }
+.noche .barra .grupo { background: rgba(255, 255, 255, 0.1); }
+@media (max-width: 400px) {
+  .barra-grupos { gap: 4px; }
+  .barra .grupo button { min-width: 30px; padding: 0 4px; }
+  .barra .grupo.pag { padding: 0 6px; }
+  .barra .grupo.pag label { display: none; }
+  .barra .grupo.pag input { width: 40px; }
+  .barra .grupo .porcentaje { min-width: 44px; font-size: 12px; }
+}
