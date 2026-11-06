@@ -96,7 +96,7 @@ De estos cuatro, ya están el 1, el 3 y el 4. Falta el 2.
 3. **Fase 3 — Unir y organizar páginas** (ver detalle abajo).
 4. **Fase 4 — Otros formatos:** descartada por David (2026-11-05). Se hizo en la 0.4.0–0.4.3 (Word, EPUB, TXT…) y se quitó del código en la 0.4.4: Dakarta es solo lector de PDF.
 5. **Fase 5 — Gemini** (ver detalle abajo).
-6. **Fase 6 — Extras:** OCR sin conexión, buscar texto en todo el documento, proteger con contraseña (hecho en la 0.4.7: abrir protegidos, poner, cambiar o quitar la contraseña en una copia), comprimir, crear PDF desde fotos/cámara (hecho en la 0.4.9), leer en voz alta (TTS de Android/Windows), convertir PDF a texto/Word (formato aproximado).
+6. **Fase 6 — Extras:** OCR sin conexión, buscar texto en todo el documento, proteger con contraseña (hecho en la 0.4.7: abrir protegidos, poner, cambiar o quitar la contraseña en una copia), comprimir (hecho en la 0.4.15), crear PDF desde fotos/cámara (hecho en la 0.4.9), leer en voz alta (TTS de Android/Windows), convertir PDF a texto/Word (formato aproximado).
 
 ## Funciones de Adobe que NO se van a hacer (y por qué)
 

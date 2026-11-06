@@ -4,6 +4,7 @@ import logo from '../assets/logo.jpg'
 import { AcercaDe } from './AcercaDe.tsx'
 import { CuadroClave, type PideClave } from './Clave.tsx'
 import { CLAVE_MAL, esErrorClave } from './clave.ts'
+import { mensajeComprimido, type Nivel } from './comprimir.ts'
 import {
   clamp01,
   COLORES_FUERTES,
@@ -134,6 +135,7 @@ export default function App() {
   const [avisoEdicion, setAvisoEdicion] = useState(false)
   const [pregunta, setPregunta] = useState<Pregunta | null>(null)
   const [pideClave, setPideClave] = useState<PideClave | null>(null)
+  const [verComprimir, setVerComprimir] = useState(false)
   const [verAcerca, setVerAcerca] = useState(false)
   // Pantalla de organizar páginas (un PDF) o de unir PDFs, con los PDFs cuyas hojas muestra al abrirse.
   const [organizar, setOrganizar] = useState<{ modo: Modo; fuentes: Fuente[] } | null>(null)
@@ -1197,6 +1199,45 @@ export default function App() {
     }
   }
 
+  /** Guarda una copia comprimida del PDF abierto (con sus anotaciones) y dice cuánto se ahorró. */
+  const comprimirPdf = async (nivel: Nivel) => {
+    if (!doc || guardando) return
+    const base = (nombreActual || doc.info.nombre).replace(/\.pdf$/i, '') || 'Documento'
+    const nombre = `${base} (comprimido).pdf`
+    setGuardando(true)
+    const puente = window.DakartaAndroid
+    let elegido: string | null = null
+    try {
+      let r: { ruta: string; antes: number; despues: number } | null
+      if (puente?.guardar && puente.copiar) {
+        elegido = await esperarDestino(nombre)
+        if (!elegido) return
+        setOcupado('Comprimiendo… (un PDF grande puede tardar un poco)')
+        const c = await invoke<{ ruta: string; antes: number; despues: number }>('comprimir_en_cache', { nivel })
+        if (!puente.copiar(elegido, c.ruta)) throw new Error('No se pudo guardar la copia.')
+        puente.persistir(elegido)
+        r = { ...c, ruta: elegido }
+        elegido = null
+      } else {
+        setOcupado('Comprimiendo… (un PDF grande puede tardar un poco)')
+        r = await invoke<{ ruta: string; antes: number; despues: number } | null>('comprimir_copia', { nombre, nivel })
+        if (!r) return
+      }
+      const guardada = r.ruta
+      const nombreDestino = puente?.nombre(guardada) || guardada.split(/[\\/]/).pop() || nombre
+      setRecientes((lista) => guardarReciente(lista, { ruta: guardada, nombre: nombreDestino }))
+      setExito(mensajeComprimido(r.antes, r.despues))
+    } catch (e) {
+      console.error(e)
+      setError('No se pudo comprimir el PDF. Inténtalo otra vez.')
+    } finally {
+      // Si falló después de elegir dónde guardar, el archivo vacío que se creó no se queda.
+      if (elegido) puente?.borrar?.(elegido)
+      setGuardando(false)
+      setOcupado('')
+    }
+  }
+
   /**
    * Guarda una copia. Con `organizar`, la copia lleva esas hojas en ese orden: al organizar se abre la
    * copia nueva; al extraer se sigue en el PDF de siempre. Con `proteccion` (una contraseña, o vacía para
@@ -1310,6 +1351,10 @@ export default function App() {
         setRecortando(null)
         return true
       }
+      if (verComprimir) {
+        setVerComprimir(false)
+        return true
+      }
       if (pideClave) {
         setPideClave(null)
         pideClave.alCancelar?.()
@@ -1348,7 +1393,7 @@ export default function App() {
     return () => {
       delete window.DakartaAtras
     }
-  }, [verIndice, verBuscar, cerrarBuscar, sucio, pregunta, pideClave, recortando, verAcerca, organizar, cerrarOrganizar])
+  }, [verIndice, verBuscar, cerrarBuscar, sucio, pregunta, pideClave, recortando, verComprimir, verAcerca, organizar, cerrarOrganizar])
 
   // Windows: avisar antes de cerrar la ventana si hay cambios sin guardar.
   useEffect(() => {
@@ -1803,6 +1848,15 @@ export default function App() {
               className="version-indice"
               onClick={() => {
                 setVerIndice(false)
+                setVerComprimir(true)
+              }}
+            >
+              Comprimir PDF
+            </button>
+            <button
+              className="version-indice"
+              onClick={() => {
+                setVerIndice(false)
                 setOrganizar({ modo: 'fotos', fuentes: [] })
               }}
             >
@@ -2137,6 +2191,38 @@ export default function App() {
               <button className="grande" onClick={() => setVerAcerca(false)}>
                 Cerrar
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {verComprimir && (
+        <div className="fondo-aviso" role="dialog" aria-modal="true" aria-labelledby="titulo-comprimir" onClick={() => setVerComprimir(false)}>
+          <div className="tarjeta-aviso" onClick={(e) => e.stopPropagation()}>
+            <h2 id="titulo-comprimir">Comprimir PDF</h2>
+            <p>Se guarda una copia más liviana: las fotos y los escaneos se achican. El PDF de ahora no cambia.</p>
+            <button
+              className="opcion-comprimir"
+              onClick={() => {
+                setVerComprimir(false)
+                void comprimirPdf('ligera')
+              }}
+            >
+              <strong>Buena calidad</strong>
+              <span>Pesa menos y se sigue imprimiendo nítido.</span>
+            </button>
+            <button
+              className="opcion-comprimir"
+              onClick={() => {
+                setVerComprimir(false)
+                void comprimirPdf('fuerte')
+              }}
+            >
+              <strong>Lo más liviano</strong>
+              <span>Para enviar por WhatsApp o correo; se lee bien en pantalla.</span>
+            </button>
+            <div className="fila-botones">
+              <button onClick={() => setVerComprimir(false)}>Cancelar</button>
             </div>
           </div>
         </div>
