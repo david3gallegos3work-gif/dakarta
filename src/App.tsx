@@ -1757,6 +1757,14 @@ export default function App() {
                       <button onClick={() => abrirReciente(r)} disabled={abriendo} title={r.nombre}>
                         {r.nombre}
                       </button>
+                      <button
+                        className="quitar-reciente"
+                        onClick={() => setRecientes((lista) => olvidarReciente(lista, r.ruta))}
+                        aria-label={`Quitar «${r.nombre}» de la lista`}
+                        title="Quitar de la lista (no borra el archivo)"
+                      >
+                        ✕
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -2030,6 +2038,14 @@ export default function App() {
                     <li key={r.ruta}>
                       <button onClick={() => abrirReciente(r)} disabled={abriendo} title={r.nombre}>
                         {r.nombre}
+                      </button>
+                      <button
+                        className="quitar-reciente"
+                        onClick={() => setRecientes((lista) => olvidarReciente(lista, r.ruta))}
+                        aria-label={`Quitar «${r.nombre}» de la lista`}
+                        title="Quitar de la lista (no borra el archivo)"
+                      >
+                        ✕
                       </button>
                     </li>
                   ))}
