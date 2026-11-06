@@ -137,26 +137,90 @@ const marcaImagenes = (parte: Pieza[]): Parte[] =>
 
 type Avance = (texto: string) => void
 
-/** Resume el documento. Si es largo, resume cada parte y luego une los resúmenes. */
-export async function resumir(piezas: Pieza[], clave: string, avance: Avance = () => {}): Promise<string> {
-  const partes = dividir(piezas)
-  if (partes.length > PARTES_MAXIMAS) throw new ErrorGemini('El PDF es muy largo para Gemini gratis de una vez. Elige menos páginas.')
-  const pedido = 'Resume este documento: primero una frase con de qué trata y luego los puntos más importantes en una lista.'
-  if (partes.length === 1) {
-    avance('Gemini está leyendo el PDF…')
-    return generar([{ text: pedido }, ...marcaImagenes(partes[0]), ...partesDe(partes[0])], clave)
-  }
-  const resumenes: string[] = []
-  for (const [i, parte] of partes.entries()) {
-    avance(`Gemini está leyendo la parte ${i + 1} de ${partes.length}…`)
-    resumenes.push(
-      `Resumen de las ${rango(parte)}:\n` +
-        (await generar([{ text: `Resume esta parte del documento (${rango(parte)}) en una lista con lo más importante.` }, ...marcaImagenes(parte), ...partesDe(parte)], clave)),
-    )
-  }
-  avance('Gemini está uniendo el resumen…')
-  return generar([{ text: `${pedido}\nSon los resúmenes de cada parte, en orden:\n\n${resumenes.join('\n\n')}` }], clave)
+/** Lo que se le puede pedir sobre todo el documento (o unas páginas). */
+export type Tarea = 'resumir' | 'puntos' | 'estudio' | 'traducir'
+
+type Receta = {
+  /** Para un documento que entra en un solo envío. */
+  todo: string
+  /** Para cada parte de un documento largo. */
+  parte: (rango: string) => string
+  /** Para unir lo de cada parte (sin esto, las partes se juntan una tras otra, como al traducir). */
+  unir?: string
+  letras?: number
+  imagenes?: number
+  maximo?: number
 }
+
+const RECETAS: Record<Tarea, Receta> = {
+  resumir: {
+    todo: 'Resume este documento: primero una frase con de qué trata y luego los puntos más importantes en una lista.',
+    parte: (r) => `Resume esta parte del documento (${r}) en una lista con lo más importante.`,
+    unir: 'Resume este documento: primero una frase con de qué trata y luego los puntos más importantes en una lista.\nSon los resúmenes de cada parte, en orden:',
+  },
+  puntos: {
+    todo: 'Saca los puntos clave de este documento: de 5 a 12 ideas principales en una lista, cada una corta y con su página.',
+    parte: (r) => `Saca las ideas principales de esta parte del documento (${r}) en una lista corta, cada una con su página.`,
+    unir: 'Junta estas ideas en una sola lista de 5 a 12 puntos clave del documento, sin repetir, cada uno con su página.\nSon las ideas de cada parte, en orden:',
+  },
+  estudio: {
+    todo: 'Crea de 8 a 12 preguntas de estudio sobre este documento. Para cada una: la pregunta en negritas y debajo su respuesta corta, con la página.',
+    parte: (r) => `Crea de 3 a 5 preguntas de estudio sobre esta parte del documento (${r}), cada una con su respuesta corta y la página.`,
+    unir: 'Elige las 10 mejores preguntas de estudio de esta lista, sin repetir, en orden del documento. Para cada una: la pregunta en negritas y debajo su respuesta corta, con la página.\nSon las preguntas de cada parte:',
+  },
+  traducir: {
+    todo: 'Traduce al español este documento (si ya está en español, tradúcelo al inglés). Escribe solo la traducción, con sus títulos, párrafos y listas. Marca cada página como [Página N].',
+    parte: (r) => `Traduce al español esta parte del documento (${r}); si ya está en español, al inglés. Escribe solo la traducción, con sus títulos, párrafos y listas. Marca cada página como [Página N].`,
+    // Una traducción es larga: partes chicas para que la respuesta entre entera.
+    letras: 10_000,
+    imagenes: 3,
+    maximo: 15,
+  },
+}
+
+/** Avisos mientras trabaja, según la tarea. */
+const LEYENDO: Record<Tarea, string> = { resumir: 'leyendo', puntos: 'leyendo', estudio: 'preparando las preguntas de', traducir: 'traduciendo' }
+
+/** Una tarea sobre el documento. Si es largo, se hace por partes y luego se une (o se juntan, al traducir). */
+export async function tareaDocumento(tarea: Tarea, piezas: Pieza[], clave: string, avance: Avance = () => {}): Promise<string> {
+  const receta = RECETAS[tarea]
+  const partes = dividir(piezas, receta.letras, receta.imagenes)
+  if (partes.length > (receta.maximo ?? PARTES_MAXIMAS)) throw new ErrorGemini('El PDF es muy largo para Gemini gratis de una vez. Elige menos páginas.')
+  const verbo = LEYENDO[tarea]
+  if (partes.length === 1) {
+    avance(`Gemini está ${verbo === 'leyendo' ? 'leyendo el PDF' : `${verbo} el PDF`}…`)
+    return generar([{ text: receta.todo }, ...marcaImagenes(partes[0]), ...partesDe(partes[0])], clave)
+  }
+  const hechos: string[] = []
+  for (const [i, parte] of partes.entries()) {
+    avance(`Gemini está ${verbo} la parte ${i + 1} de ${partes.length}…`)
+    const r = await generar([{ text: receta.parte(rango(parte)) }, ...marcaImagenes(parte), ...partesDe(parte)], clave)
+    hechos.push(receta.unir ? `De las ${rango(parte)}:\n${r}` : r)
+  }
+  if (!receta.unir) return hechos.join('\n\n')
+  avance('Gemini está uniendo todo…')
+  return generar([{ text: `${receta.unir}\n\n${hechos.join('\n\n')}` }], clave)
+}
+
+/** Resume el documento. Si es largo, resume cada parte y luego une los resúmenes. */
+export const resumir = (piezas: Pieza[], clave: string, avance: Avance = () => {}) => tareaDocumento('resumir', piezas, clave, avance)
+
+/** Explica en palabras sencillas un texto elegido del PDF. */
+export const explicar = (texto: string, clave: string) =>
+  generar(
+    [
+      {
+        text:
+          'Explica en palabras sencillas este texto de un documento, como a alguien que no conoce el tema. ' +
+          `Si tiene palabras técnicas o siglas, di qué significan. No repitas el texto.\n\n«${texto}»`,
+      },
+    ],
+    clave,
+  )
+
+/** Traduce un texto elegido (al español; si ya está en español, al inglés). */
+export const traducirTexto = (texto: string, clave: string) =>
+  generar([{ text: `Traduce al español este texto (si ya está en español, al inglés). Escribe solo la traducción.\n\n«${texto}»` }], clave)
 
 const conversacion = (historial: Charla[]) =>
   historial.length

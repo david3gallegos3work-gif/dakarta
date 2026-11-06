@@ -140,6 +140,8 @@ export default function App() {
   const [verComprimir, setVerComprimir] = useState(false)
   const [verGemini, setVerGemini] = useState(false)
   const [claveGemini, setClaveGemini] = useState('')
+  /** El texto seleccionado que se manda a Gemini para explicarlo (vacío: Gemini sobre las páginas). */
+  const [elegidoGemini, setElegidoGemini] = useState('')
   const [verAcerca, setVerAcerca] = useState(false)
   // Pantalla de organizar páginas (un PDF) o de unir PDFs, con los PDFs cuyas hojas muestra al abrirse.
   const [organizar, setOrganizar] = useState<{ modo: Modo; fuentes: Fuente[] } | null>(null)
@@ -1221,8 +1223,9 @@ export default function App() {
     })
   }
 
-  const abrirGemini = () => {
+  const abrirGemini = (elegido = '') => {
     setVerIndice(false)
+    setElegidoGemini(elegido)
     invoke<string>('gemini_clave')
       .then(setClaveGemini)
       .catch(() => setClaveGemini(''))
@@ -1634,6 +1637,16 @@ export default function App() {
           {noche ? '☀' : '☾'}
         </button>
       </header>
+      {doc && (
+        // Cuál PDF está abierto (con varios recientes, si no, se confunde).
+        <div className="titulo-pdf" title={nombreActual || doc.info.nombre}>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 2h9l5 5v15H6z M14 2v6h6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+          </svg>
+          <span>{nombreLegible(nombreActual || doc.info.nombre)}</span>
+          {sucio && <small>· sin guardar</small>}
+        </div>
+      )}
 
       {verBuscar && doc && (
         <div className="buscar">
@@ -1685,6 +1698,19 @@ export default function App() {
         <div className="seleccion-texto">
           <span>Mantén presionado o arrastra sobre el texto. Luego toca Copiar. En escaneos no hay texto.</span>
           <button onClick={copiarSeleccion}>Copiar</button>
+          <button
+            onClick={() => {
+              const actual = window.getSelection()?.toString() ?? ''
+              const texto = (actual.trim() ? actual : textoSeleccionado.current).trim()
+              if (!texto) {
+                setExito('Primero selecciona el texto que quieres que Gemini te explique.')
+                return
+              }
+              abrirGemini(texto.slice(0, 8000))
+            }}
+          >
+            ✨ Explicar
+          </button>
           <button
             onClick={() => {
               window.getSelection()?.removeAllRanges()
@@ -1887,7 +1913,7 @@ export default function App() {
             >
               Comprimir PDF
             </button>
-            <button className="version-indice" onClick={abrirGemini}>
+            <button className="version-indice" onClick={() => abrirGemini()}>
               ✨ Gemini: resumir y preguntar
             </button>
             <button
@@ -2235,9 +2261,10 @@ export default function App() {
 
       {verGemini && doc && (
         <Gemini
-          key={doc.id}
+          key={`${doc.id}-${elegidoGemini}`}
           paginas={doc.info.paginas}
           clave={claveGemini}
+          elegido={elegidoGemini || undefined}
           onClave={async (c) => {
             await invoke('gemini_guardar', { clave: c })
             setClaveGemini(c)
