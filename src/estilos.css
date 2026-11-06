@@ -293,3 +293,11 @@ html, body, #root { margin: 0; height: 100%; overflow: hidden; }
 .recientes .quitar-reciente, .recientes-panel .quitar-reciente { flex: none; width: 40px; padding: 0; text-align: center; color: #607d8b; font-size: 16px; }
 .recientes .quitar-reciente:hover, .recientes-panel .quitar-reciente:hover { background: #ffebee; color: #c62828; }
 .noche .recientes .quitar-reciente, .noche .recientes-panel .quitar-reciente { color: #aaa; }
+.organizar-pista { background: #fff8e1; color: #6d4c00; font-weight: 600; }
+.noche .organizar-pista { background: #3e2f00; color: #ffe082; }
+.opcion-comprimir { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 14px; border: 1px solid #9fb3c8; border-radius: 10px; background: #fff; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.opcion-comprimir strong { font-size: 16px; color: #1565c0; }
+.opcion-comprimir span { font-size: 14px; opacity: 0.8; }
+.opcion-comprimir:hover { background: #e3f2fd; }
+.noche .opcion-comprimir { background: #2f2f2f; border-color: #555; }
+.noche .opcion-comprimir strong { color: #90caf9; }

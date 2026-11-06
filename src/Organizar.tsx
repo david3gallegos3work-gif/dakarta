@@ -254,9 +254,16 @@ export function Organizar({
           {error} (tocar para cerrar)
         </button>
       ) : (
-        <p className={aviso ? 'organizar-ayuda organizar-ok' : 'organizar-ayuda'} role="status">
+        <p
+          className={aviso ? 'organizar-ayuda organizar-ok' : marcadas.size && (fotos || unir) ? 'organizar-ayuda organizar-pista' : 'organizar-ayuda'}
+          role="status"
+        >
           {aviso ||
-            (fotos && diseno === 'documentos' && !marcadas.size
+            (fotos && marcadas.size
+              ? `Para agregar otra foto, primero quita la selección: toca un espacio en blanco.${marcadas.size === 1 ? ' Para dejar solo el documento, toca «Recortar».' : ''}`
+              : unir && marcadas.size
+              ? 'Para agregar otro PDF, primero quita la selección: toca un espacio en blanco.'
+              : fotos && diseno === 'documentos'
               ? 'Van dos por fila a tamaño real: cédula (frente y reverso), luego papeleta (frente y reverso). Marca cada foto y toca «Recortar» para dejar solo el documento.'
               : fotos && !lista.length
               ? `Toca «+ Fotos» para elegirlas${android ? ' o «Cámara» para tomar una' : ''}. Cada foto será una hoja.`
