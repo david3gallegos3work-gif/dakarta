@@ -13,6 +13,8 @@ Las reglas generales están en `~/.claude/CLAUDE.md`; aquí solo lo de este proy
 - El APK y el .exe quedan en Releases: `https://github.com/david3gallegos3work-gif/dakarta/releases/latest/download/Dakarta.apk` y `.../Dakarta-Windows.exe`.
 - Verificar antes de decir "listo": `npm test` y `npm run build` (si hay RAM), y que la compilación de Actions termine en verde.
 - La PC tiene poca RAM: nada de `tauri dev` ni compilar Rust localmente.
+- MuPDF: no llamar `needs_password` después de `authenticate` (prueba la contraseña vacía y olvida la buena: hojas en blanco).
+- Pruebas del motor: abrir el PDF también por descriptor (`/proc/self/fd/N`), como lo hace Android, no solo por ruta.
 
 ## Cómo está armado
 - `src-tauri/src/motor.rs`: un solo hilo con MuPDF; pinta páginas a JPEG y las entrega por el protocolo `pagina://` (no base64 por IPC). Sus partes están en `motor/`: `anotar`, `formulario`, `busqueda`, `capas` (palabras y enlaces), `organizar` (mover, girar, quitar o duplicar hojas en una copia, y unir varios PDFs), `fotos` (crear un PDF desde fotos), `comprimir` (achicar las imágenes en una copia), `pintar` (y guardar, con o sin contraseña) y `pruebas` (`cargo test`).
