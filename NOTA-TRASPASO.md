@@ -2,7 +2,7 @@
 
 **Fecha y lugar:** 2026-11-03 22:20, en la PC. Actualizada el 2026-11-05 (Ecuador) desde la nube.
 **IA y aparato:** Claude Code. Revisión en la PC; arreglos en la nube.
-**Rama:** `main` (versión 0.5.0).
+**Rama:** `main` (versión 0.5.1).
 
 ## Hecho en la nube (2026-11-03 y 2026-11-04)
 
@@ -42,6 +42,8 @@
 - 0.4.15: con hojas marcadas en fotos o unir, arriba sale en amarillo «Para agregar otra foto (otro PDF), primero quita la selección: toca un espacio en blanco» (pedido de David). Comprimir PDF (panel ☰): «Buena calidad» (imágenes hasta 2000 px, JPEG 80) o «Lo más liviano» (1300 px, JPEG 60). `motor/comprimir.rs`: en una copia (con anotaciones y contraseña), recorre las imágenes de cada hoja y de sus Form, lee sus puntos, las promedia más chicas y las guarda como JPEG solo si ahorran al menos 10 %; no toca máscaras, Decode, CMYK, paletas, JPEG 2000 ni JPEG ya chicos. Guarda con garbage 3 y fuentes comprimidas. Se usó la API segura del crate (pdf_rewrite_images de MuPDF no está expuesta sin protección ante errores). Mensaje con los pesos («de 48 MB a 9,3 MB, 81 % menos», `src/comprimir.ts`); la copia queda en «Últimos archivos» y se sigue en el PDF de antes. Pruebas: 33 del motor, 28 de la pantalla.
 - David probó comprimir: el PDF de prueba de 22,15 MB quedó en 4,07 MB (buena calidad) y 1,47 MB (lo más liviano).
 - 0.5.0 (Fase 5, primera parte): Gemini en el panel ☰ («✨ Gemini: resumir y preguntar», `src/Gemini.tsx`, lógica en `src/gemini.ts`, basada en el módulo de Datheke que David autorizó revisar). Vincular: «Abrir Google» (`abrir_pagina_gemini`, URL fija) → pegar → se revisa con Google antes de guardar. La clave va en la carpeta privada de la app (`gemini.clave`, mezclada para no leerse a simple vista; no es cifrado fuerte: la protección es la carpeta privada), nunca en GitHub. Resumir (todo o páginas desde–hasta) y preguntar (con lo ya hablado). El texto sale del motor (`textos`, `textos_de` en `motor/capas.rs`); las páginas escaneadas van como imagen de 1100 px por `pagina://`. PDFs largos: partes de 150 000 letras o 12 imágenes (máximo 8 partes); al resumir se une; al preguntar se busca en cada parte y se descartan las que responden NADA. Modelos: Flash-Lite y luego Flash (se recuerda el que funcionó). Errores claros (límite gratis 429, clave no aceptada, sin conexión, país, demasiado largo). Respuesta en texto simple con viñetas y negritas (sin HTML) y botón Copiar. Pruebas: 35 del motor, 36 de la pantalla. Falta (segunda parte): explicar lo seleccionado, traducir, puntos clave, preguntas de estudio.
+- David probó la 0.5.0 (Gemini resumir y preguntar): funciona muy bien.
+- 0.5.1: nombre del PDF abierto en una franja bajo la barra (`.titulo-pdf`, con «· sin guardar» si hay cambios). Gemini, segunda parte: «Puntos clave», «Preguntas de estudio» y «Traducir» sobre las páginas (`tareaDocumento` con una receta por tarea; traducir va en partes de 10 000 letras, hasta 15, y se juntan sin resumir) y «✨ Explicar» en la barra de seleccionar texto: abre Gemini y explica el texto elegido (también «Traducir» ese texto). Pruebas: 35 del motor, 39 de la pantalla. Pendiente: David elige el diseño nuevo del menú lateral (A secciones, B cuadrícula, C grupos de color; capturas en el chat).
 - Falta que David pruebe en el celular: "Abrir con" con cambios sin guardar debe preguntar; en Windows, guardar encima del PDF abierto debe avisar.
 
 ## Qué estaba haciendo

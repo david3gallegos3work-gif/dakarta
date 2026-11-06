@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { ErrorGemini, MODELOS, SinConexion, dividir, partesDe, preguntar, resumir, revisarClave, type Pieza } from './gemini.ts'
+import { ErrorGemini, MODELOS, SinConexion, dividir, explicar, partesDe, preguntar, resumir, revisarClave, tareaDocumento, type Pieza } from './gemini.ts'
 
 function simular(...respuestas: (Response | Error)[]) {
   const llamadas: { url: string; init: RequestInit }[] = []
@@ -76,4 +76,28 @@ test('errores en palabras simples: límite gratis, clave mala, sin internet, dem
   simular(new TypeError('Failed to fetch'))
   await assert.rejects(revisarClave('k'), (e: Error) => e instanceof SinConexion)
   await assert.rejects(resumir(paginas(9, 150_000), 'k'), (e: Error) => /muy largo/.test(e.message))
+})
+
+test('puntos clave y preguntas de estudio piden lo suyo', async () => {
+  const llamadas = simular(respuesta('- idea'), respuesta('**¿Qué?** Esto.'))
+  await tareaDocumento('puntos', paginas(1), 'k')
+  await tareaDocumento('estudio', paginas(1), 'k')
+  assert.match(String(llamadas[0].init.body), /puntos clave/)
+  assert.match(String(llamadas[1].init.body), /preguntas de estudio/)
+})
+
+test('traducir un PDF largo va en partes chicas y se juntan sin resumir', async () => {
+  const llamadas = simular(respuesta('Uno'), respuesta('Dos'))
+  const avisos: string[] = []
+  const r = await tareaDocumento('traducir', paginas(2, 8_000), 'k', (t) => avisos.push(t))
+  assert.equal(r, 'Uno\n\nDos')
+  assert.equal(llamadas.length, 2)
+  assert.equal(avisos[0], 'Gemini está traduciendo la parte 1 de 2…')
+  await assert.rejects(tareaDocumento('traducir', paginas(20, 9_000), 'k'), (e: Error) => /muy largo/.test(e.message))
+})
+
+test('explicar manda solo el texto elegido', async () => {
+  const llamadas = simular(respuesta('Quiere decir que…'))
+  assert.equal(await explicar('Lean Manufacturing reduce desperdicios', 'k'), 'Quiere decir que…')
+  assert.match(String(llamadas[0].init.body), /palabras sencillas[\s\S]*Lean Manufacturing reduce desperdicios/)
 })
