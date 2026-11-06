@@ -77,8 +77,13 @@ export function medidaEnderezada(q: Recorte, ancho: number, alto: number): { anc
   }
 }
 
-/** Lado más largo de la foto en el PDF: nítida al imprimir en A4 (unos 280 ppp) sin pesar de más. */
-export const LADO_MAXIMO = 2400
+/**
+ * Lado más largo de la foto en el PDF: en una hoja A4 da unos 240 ppp (nítida al imprimir); un documento a
+ * tamaño real (8,6 cm) necesita menos. Más que esto solo hace más lento y pesado el PDF.
+ */
+export const LADO_MAXIMO: Record<Diseno, number> = { a4: 2000, foto: 2000, documentos: 1400 }
+/** La copia de trabajo de cada foto (se abre una sola vez al agregarla; lo demás sale de esta). */
+export const LADO_TRABAJO = 2400
 /** Lado más largo de la miniatura en pantalla. */
 export const LADO_MINIATURA = 320
 
@@ -104,8 +109,8 @@ function lienzo(ancho: number, alto: number): [HTMLCanvasElement, CanvasRenderin
 
 /** Endereza el documento: cada píxel del rectángulo final se toma de su lugar en la foto (con suavizado). */
 function enderezar(imagen: ImageBitmap, q: Recorte, maximo: number): HTMLCanvasElement {
-  // La foto se lee a un tamaño algo mayor que el final: alcanza para la nitidez y ahorra memoria.
-  const fuente = achicar(imagen.width, imagen.height, Math.min(4000, Math.round(maximo * 1.6)))
+  // La foto se lee a un tamaño algo mayor que el final: alcanza para la nitidez y ahorra tiempo y memoria.
+  const fuente = achicar(imagen.width, imagen.height, Math.round(maximo * 1.3))
   const [cf, gf] = lienzo(fuente.ancho, fuente.alto)
   gf.drawImage(imagen, 0, 0, fuente.ancho, fuente.alto)
   const origen = gf.getImageData(0, 0, fuente.ancho, fuente.alto).data
@@ -115,40 +120,70 @@ function enderezar(imagen: ImageBitmap, q: Recorte, maximo: number): HTMLCanvasE
   const [cd, gd] = lienzo(ancho, alto)
   const salida = gd.createImageData(ancho, alto)
   const d = salida.data
-  const llevar = deRectanguloA(q)
   const W = fuente.ancho
   const H = fuente.alto
+  // Los mismos coeficientes que deRectanguloA, ya en píxeles: sin crear nada por cada píxel (es lo más lento).
+  const [p0, p1, p2, p3] = q
+  const dx1 = p1.x - p2.x
+  const dx2 = p3.x - p2.x
+  const dx3 = p0.x - p1.x + p2.x - p3.x
+  const dy1 = p1.y - p2.y
+  const dy2 = p3.y - p2.y
+  const dy3 = p0.y - p1.y + p2.y - p3.y
+  const det = dx1 * dy2 - dx2 * dy1
+  let g = 0
+  let h = 0
+  if ((Math.abs(dx3) > 1e-12 || Math.abs(dy3) > 1e-12) && Math.abs(det) > 1e-12) {
+    g = (dx3 * dy2 - dx2 * dy3) / det
+    h = (dx1 * dy3 - dx3 * dy1) / det
+  }
+  const a = (p1.x - p0.x + g * p1.x) * W
+  const b = (p3.x - p0.x + h * p3.x) * W
+  const c = p0.x * W
+  const e = (p1.y - p0.y + g * p1.y) * H
+  const f = (p3.y - p0.y + h * p3.y) * H
+  const k0 = p0.y * H
+  const maxX = W - 1
+  const maxY = H - 1
+  let k = 0
   for (let j = 0; j < alto; j++) {
+    const v = (j + 0.5) / alto
     for (let i = 0; i < ancho; i++) {
-      const p = llevar((i + 0.5) / ancho, (j + 0.5) / alto)
-      const x = entre(p.x * W - 0.5, 0, W - 1)
-      const y = entre(p.y * H - 0.5, 0, H - 1)
-      const x0 = Math.floor(x)
-      const y0 = Math.floor(y)
-      const x1 = Math.min(x0 + 1, W - 1)
-      const y1 = Math.min(y0 + 1, H - 1)
+      const u = (i + 0.5) / ancho
+      const w = g * u + h * v + 1
+      let x = (a * u + b * v + c) / w - 0.5
+      let y = (e * u + f * v + k0) / w - 0.5
+      x = x < 0 ? 0 : x > maxX ? maxX : x
+      y = y < 0 ? 0 : y > maxY ? maxY : y
+      const x0 = x | 0
+      const y0 = y | 0
       const fx = x - x0
       const fy = y - y0
-      const a = (y0 * W + x0) * 4
-      const b = (y0 * W + x1) * 4
-      const c = (y1 * W + x0) * 4
-      const e = (y1 * W + x1) * 4
-      const k = (j * ancho + i) * 4
+      const x1 = x0 < maxX ? x0 + 1 : x0
+      const y1 = y0 < maxY ? y0 + 1 : y0
+      const ia = (y0 * W + x0) << 2
+      const ib = (y0 * W + x1) << 2
+      const ic = (y1 * W + x0) << 2
+      const id = (y1 * W + x1) << 2
       for (let n = 0; n < 3; n++) {
-        const arriba = origen[a + n] + (origen[b + n] - origen[a + n]) * fx
-        const abajo = origen[c + n] + (origen[e + n] - origen[c + n]) * fx
+        const arriba = origen[ia + n] + (origen[ib + n] - origen[ia + n]) * fx
+        const abajo = origen[ic + n] + (origen[id + n] - origen[ic + n]) * fx
         d[k + n] = arriba + (abajo - arriba) * fy
       }
       d[k + 3] = 255
+      k += 4
     }
   }
   gd.putImageData(salida, 0, 0)
   return cd
 }
 
-/** Recorta (y endereza si hace falta), gira y achica la foto, y la entrega como JPEG. El navegador ya la endereza (EXIF). */
+/** Recorta (y endereza si hace falta), gira y achica la foto, y la entrega como JPEG. */
 async function pintarFoto(archivo: Blob, maximo: number, giro: number, calidad: number, r = FOTO_ENTERA): Promise<Blob> {
-  const imagen = await createImageBitmap(archivo)
+  return pintarImagen(await createImageBitmap(archivo), maximo, giro, calidad, r)
+}
+
+async function pintarImagen(imagen: ImageBitmap, maximo: number, giro: number, calidad: number, r = FOTO_ENTERA): Promise<Blob> {
   try {
     let pieza: CanvasImageSource = imagen
     let sx = 0
@@ -182,15 +217,53 @@ async function pintarFoto(archivo: Blob, maximo: number, giro: number, calidad: 
   }
 }
 
+/**
+ * Al agregar una foto se abre una sola vez (lo más lento: una foto de celular tiene unos 12 millones de
+ * puntos) y de ahí salen su copia de trabajo, más liviana, y su miniatura. El navegador ya la endereza (EXIF).
+ */
+export async function prepararFoto(archivo: Blob): Promise<{ trabajo: Blob; miniatura: string }> {
+  const imagen = await createImageBitmap(archivo)
+  try {
+    const { ancho, alto } = achicar(imagen.width, imagen.height, LADO_TRABAJO)
+    // Si ya es chica, se usa tal cual.
+    const trabajo =
+      ancho === imagen.width && archivo.type === 'image/jpeg'
+        ? archivo
+        : await new Promise<Blob>((listo, falla) => {
+            const [c, g] = lienzo(ancho, alto)
+            g.drawImage(imagen, 0, 0, ancho, alto)
+            c.toBlob((b) => (b ? listo(b) : falla(new Error('Sin JPEG'))), 'image/jpeg', 0.92)
+          })
+    const { ancho: w, alto: h } = achicar(imagen.width, imagen.height, LADO_MINIATURA)
+    const [c, g] = lienzo(w, h)
+    g.drawImage(imagen, 0, 0, w, h)
+    const mini = await new Promise<Blob | null>((listo) => c.toBlob(listo, 'image/jpeg', 0.8))
+    if (!mini) throw new Error('Sin JPEG')
+    return { trabajo, miniatura: URL.createObjectURL(mini) }
+  } finally {
+    imagen.close()
+  }
+}
+
 /** Miniatura para la pantalla, ya recortada (una dirección blob: que se suelta al cerrar). */
 export async function miniaturaDe(archivo: Blob, recorte?: Recorte): Promise<string> {
   return URL.createObjectURL(await pintarFoto(archivo, LADO_MINIATURA, 0, 0.8, recorte))
 }
 
 /** La foto lista para el PDF: enderezada, recortada, girada, achicada y en JPEG. */
-export async function jpegDe(archivo: Blob, giro: number, recorte?: Recorte): Promise<Uint8Array> {
+export async function jpegDe(archivo: Blob, giro: number, diseno: Diseno, recorte?: Recorte): Promise<Blob> {
   const g = ((giro % 360) + 360) % 360
-  return new Uint8Array(await (await pintarFoto(archivo, LADO_MAXIMO, g, 0.85, recorte)).arrayBuffer())
+  return pintarFoto(archivo, LADO_MAXIMO[diseno], g, 0.85, recorte)
+}
+
+/** El JPEG en base64 (Android: así viaja al motor tres veces más liviano que como lista de números). */
+export function base64De(jpg: Blob): Promise<string> {
+  return new Promise((listo, falla) => {
+    const r = new FileReader()
+    r.onload = () => listo(String(r.result).slice(String(r.result).indexOf(',') + 1))
+    r.onerror = () => falla(r.error)
+    r.readAsDataURL(jpg)
+  })
 }
 
 /** Nombre sugerido: «Fotos 2026-11-05.pdf». */

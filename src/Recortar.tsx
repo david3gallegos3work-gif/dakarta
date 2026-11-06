@@ -11,7 +11,7 @@ export function Recortar({
   onListo,
   onCancelar,
 }: {
-  archivo: File
+  archivo: Blob
   inicial?: Recorte
   onListo: (r: Recorte) => void
   onCancelar: () => void
