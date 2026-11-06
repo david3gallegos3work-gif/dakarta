@@ -57,7 +57,7 @@ Hasta la 0.5.1 está todo hecho, publicado y probado por David (la 0.5.2, barra 
 Revisión del 2026-11-06, en la nube:
 - La app no se ejecutó en un aparato desde la nube; lo marcado "por comprobar" depende de que David lo pruebe.
 - La última compilación (Android y Windows) terminó bien y publicó la 0.5.2 (APK y .exe, con número y sin número).
-- `npm test`: 39 pruebas de la pantalla pasan. `npm run build`: sin errores. El motor tiene 35 pruebas (`cargo test`), que pasaron al compilar la 0.5.1 y no se volvieron a correr en esta revisión.
+- `npm test`: 39 pruebas de la pantalla pasan. `npm run build`: sin errores. El motor tiene 35 pruebas (`cargo test`): las 35 pasan.
 - `main` al día, sin cambios abiertos.
 
 ## Hallazgos, de más a menos grave
