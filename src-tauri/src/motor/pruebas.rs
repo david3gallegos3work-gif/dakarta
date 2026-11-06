@@ -663,3 +663,14 @@ fn pdf_con_imagen(doc: &mut PdfDocument, img: &mupdf::Image) {
     let hoja = doc.add_object(&hoja).unwrap();
     doc.insert_page(0, &hoja).unwrap();
 }
+
+#[test]
+fn textos_para_gemini_por_pagina() {
+    let doc = pdf_con_texto("gemini", 3);
+    assert_eq!(textos_de(&doc, 0, 2).unwrap(), ["gemini 1", "gemini 2", "gemini 3"]);
+    assert_eq!(textos_de(&doc, 1, 1).unwrap(), ["gemini 2"]);
+    assert!(textos_de(&doc, 2, 5).is_err());
+    assert!(textos_de(&doc, 2, 1).is_err());
+    // Una hoja sin texto (como un escaneo) queda vacía.
+    assert_eq!(textos_de(&pdf_vacio(), 0, 0).unwrap(), [""]);
+}
