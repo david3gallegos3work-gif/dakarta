@@ -291,6 +291,8 @@ enum Pedido {
     Anotaciones { n: i32, resp: Sender<Result<Vec<Anotacion>, String>> },
     Palabras { n: i32, resp: Sender<Result<Vec<Palabra>, String>> },
     Enlaces { n: i32, resp: Sender<Result<Vec<Enlace>, String>> },
+    /// El texto de las páginas `desde`..=`hasta` (una cadena por página; vacía si es escaneada).
+    Textos { desde: i32, hasta: i32, resp: Sender<Result<Vec<String>, String>> },
     Mover { n: i32, xref: i32, dx: f32, dy: f32, resp: Sender<Result<(), String>> },
     Editar {
         n: i32,
@@ -442,6 +444,13 @@ impl Motor {
                             let r = match &abierto {
                                 None => Err("No hay un documento abierto".into()),
                                 Some((doc, _)) => enlaces_de(doc, n),
+                            };
+                            let _ = resp.send(r);
+                        }
+                        Pedido::Textos { desde, hasta, resp } => {
+                            let r = match &abierto {
+                                None => Err("No hay un documento abierto".into()),
+                                Some((doc, _)) => textos_de(doc, desde, hasta),
                             };
                             let _ = resp.send(r);
                         }
@@ -767,6 +776,12 @@ impl Motor {
     pub fn palabras(&self, n: i32) -> Result<Vec<Palabra>, String> {
         let (tx, rx) = mpsc::channel();
         self.0.send(Pedido::Palabras { n, resp: tx }).map_err(texto)?;
+        rx.recv().map_err(texto)?
+    }
+
+    pub fn textos(&self, desde: i32, hasta: i32) -> Result<Vec<String>, String> {
+        let (tx, rx) = mpsc::channel();
+        self.0.send(Pedido::Textos { desde, hasta, resp: tx }).map_err(texto)?;
         rx.recv().map_err(texto)?
     }
 

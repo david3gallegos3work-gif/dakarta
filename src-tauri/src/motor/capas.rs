@@ -55,3 +55,34 @@ pub(super) fn palabras_de(doc: &PdfDocument, n: i32) -> Result<Vec<Palabra>, Str
     }
     Ok(lista)
 }
+
+/// El texto de las páginas `desde`..=`hasta` (desde 0), para Gemini: una cadena por página, con los
+/// espacios repetidos juntados. Una página escaneada (sin texto) queda vacía.
+pub(super) fn textos_de(doc: &PdfDocument, desde: i32, hasta: i32) -> Result<Vec<String>, String> {
+    let total = doc.page_count().map_err(texto)?;
+    if desde < 0 || hasta < desde || hasta >= total {
+        return Err("Esas páginas no están en el PDF.".into());
+    }
+    (desde..=hasta)
+        .map(|n| {
+            let t = doc.load_page(n).and_then(|p| p.text(TextExtractOptions::default())).map_err(texto)?;
+            // Sin renglones vacíos repetidos ni espacios de más: menos para enviar.
+            let mut limpio = String::with_capacity(t.len());
+            let mut vacias = 0;
+            for linea in t.lines() {
+                let linea = linea.split_whitespace().collect::<Vec<_>>().join(" ");
+                if linea.is_empty() {
+                    vacias += 1;
+                    if vacias > 1 {
+                        continue;
+                    }
+                } else {
+                    vacias = 0;
+                }
+                limpio.push_str(&linea);
+                limpio.push('\n');
+            }
+            Ok(limpio.trim().to_string())
+        })
+        .collect()
+}
